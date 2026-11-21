@@ -46,6 +46,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -180,7 +182,6 @@ enum class LoopMode { OFF, ALL, ONE }
 data class PlaybackUi(
     val song: Song? = null,
     val isPlaying: Boolean = false,
-    val positionMs: Long = 0,
     val durationMs: Long = 0,
     val shuffle: Boolean = false,
     val loop: LoopMode = LoopMode.OFF,
@@ -193,7 +194,6 @@ private fun readPlayback(player: Player, songsById: Map<String, Song>): Playback
     return PlaybackUi(
         song = song,
         isPlaying = player.playWhenReady && player.playbackState != Player.STATE_ENDED,
-        positionMs = player.currentPosition.coerceAtLeast(0),
         durationMs = duration,
         shuffle = player.shuffleModeEnabled,
         loop = when (player.repeatMode) {
@@ -219,6 +219,9 @@ private fun PlayerApp() {
 
     val controller = rememberMediaController()
     var ui by remember { mutableStateOf(PlaybackUi()) }
+    // La posición va aparte: así solo se redibuja la barra de tiempo, no toda la pantalla.
+    var positionMs by remember { mutableLongStateOf(0L) }
+    val position = remember { { positionMs } }
     LaunchedEffect(controller, songsById) {
         val player = controller ?: return@LaunchedEffect
         // Seguir donde te quedaste: recupera la última lista, canción y segundo.
@@ -233,12 +236,14 @@ private fun PlayerApp() {
         }
         var tick = 0
         while (true) {
-            ui = readPlayback(player, songsById)
+            val fresh = readPlayback(player, songsById)
+            if (fresh != ui) ui = fresh
+            positionMs = player.currentPosition.coerceAtLeast(0)
             tick++
-            if (tick % 8 == 0) {
-                ui.song?.let { store.saveProgress(it.id, ui.positionMs) }
+            if (tick % 10 == 0) {
+                ui.song?.let { store.saveProgress(it.id, positionMs) }
             }
-            delay(250)
+            delay(200)
         }
     }
 
@@ -275,12 +280,12 @@ private fun PlayerApp() {
                 tween(durationMillis = 420, easing = FastOutSlowInEasing),
             )
         }
-        val openFraction = (1f - offsetY.value / heightPx).coerceIn(0f, 1f)
 
         LibraryScreen(
             songs = songs,
             playback = ui,
             store = store,
+            position = position,
             onPlay = { list, index, source ->
                 controller?.let { player ->
                     player.setMediaItems(list.map { it.toMediaItem() }, index, 0L)
@@ -299,22 +304,22 @@ private fun PlayerApp() {
         )
 
         // Oscurece la lista mientras el reproductor sube o baja (transición suave).
-        if (openFraction > 0f) {
+        val playerVisible by remember(heightPx) { derivedStateOf { offsetY.value < heightPx - 0.5f } }
+        if (playerVisible) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = openFraction * 0.7f }
+                    .graphicsLayer { alpha = (1f - offsetY.value / heightPx).coerceIn(0f, 1f) * 0.7f }
                     .background(Color.Black)
             )
         }
 
-        if (ui.song != null && offsetY.value < heightPx) {
+        if (ui.song != null && playerVisible) {
             val player = controller
             BackHandler(enabled = showPlayer) { showPlayer = false }
             Box(
                 Modifier
                     .fillMaxSize()
-                    .offset { IntOffset(0, offsetY.value.roundToInt()) }
                     // Deslizar el dedo hacia abajo baja el reproductor siguiendo tu dedo.
                     .draggable(
                         orientation = Orientation.Vertical,
@@ -333,6 +338,8 @@ private fun PlayerApp() {
                             }
                         },
                     )
+                    // Se mueve con graphicsLayer (en la GPU), sin recalcular la pantalla en cada cuadro.
+                    .graphicsLayer { translationY = offsetY.value }
             ) {
                 NowPlayingScreen(
                     playback = ui,
@@ -340,6 +347,7 @@ private fun PlayerApp() {
                     isFavorite = ui.song?.let { store.isFavorite(it.id) } ?: false,
                     onToggleFavorite = { ui.song?.let { store.toggleFavorite(it.id) } },
                     onAddToPlaylist = { pickPlaylistFor = ui.song },
+                    position = position,
                     onPlayPause = ::playPause,
                     onPrevious = { player?.seekToPrevious() },
                     onNext = { player?.seekToNext() },

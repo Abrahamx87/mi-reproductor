@@ -39,10 +39,10 @@ jobs:
           echo "OPSOUND_KEY_PASS=$PASS" >> "$GITHUB_ENV"
 
       - name: Armar APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Renombrar APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk Opsound.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Opsound.apk
 
       - uses: actions/upload-artifact@v4
         with:

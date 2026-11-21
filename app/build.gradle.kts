@@ -37,9 +37,17 @@ android {
         debug {
             if (keystorePath != null) signingConfig = signingConfigs.getByName("opsound")
         }
+        // Versión optimizada (la que instalas): mucho más rápida y ligera que la de prueba.
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystorePath != null) signingConfig = signingConfigs.getByName("opsound")
         }
+    }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

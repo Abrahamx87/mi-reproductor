@@ -97,6 +97,7 @@ fun LibraryScreen(
     songs: List<Song>?,
     store: OpsoundStore,
     playback: PlaybackUi,
+    position: () -> Long,
     onPlay: (list: List<Song>, index: Int, source: String) -> Unit,
     onOpenPlayer: () -> Unit,
     onPlayPause: () -> Unit,
@@ -234,7 +235,7 @@ fun LibraryScreen(
         }
 
         if (playback.song != null) {
-            MiniPlayer(playback, onOpenPlayer, onPlayPause)
+            MiniPlayer(playback, position, onOpenPlayer, onPlayPause)
         }
         Spacer(Modifier.navigationBarsPadding())
     }
@@ -462,11 +463,9 @@ private fun SmallCover(song: Song, size: Dp) {
 }
 
 @Composable
-private fun MiniPlayer(playback: PlaybackUi, onOpen: () -> Unit, onPlayPause: () -> Unit) {
+private fun MiniPlayer(playback: PlaybackUi, position: () -> Long, onOpen: () -> Unit, onPlayPause: () -> Unit) {
     val song = playback.song ?: return
-    val progress = if (playback.durationMs > 0) {
-        (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f)
-    } else 0f
+    val smooth = rememberSmoothPosition(position, playback.durationMs, playback.isPlaying)
 
     Column(
         Modifier
@@ -474,9 +473,7 @@ private fun MiniPlayer(playback: PlaybackUi, onOpen: () -> Unit, onPlayPause: ()
             .background(Color(0xFF141C23))
             .clickable(onClick = onOpen)
     ) {
-        Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.15f))) {
-            Box(Modifier.fillMaxWidth(progress).height(2.dp).background(Color.White))
-        }
+        SmoothProgressLine(smooth, playback.durationMs, Modifier.fillMaxWidth())
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

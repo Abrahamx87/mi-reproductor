@@ -64,6 +64,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
@@ -99,9 +102,12 @@ fun NowPlayingScreen(
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
+    position: () -> Long,
 ) {
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
+    val background = rememberBlurredBackground(song, cover)
+    val smooth = rememberSmoothPosition(position, playback.durationMs, playback.isPlaying)
     var menuOpen by remember { mutableStateOf(false) }
 
     Box(
@@ -111,7 +117,7 @@ fun NowPlayingScreen(
             // Evita que los toques pasen a la lista que está debajo.
             .pointerInput(Unit) { detectTapGestures { } }
     ) {
-        Crossfade(targetState = cover, label = "fondo") { art ->
+        Crossfade(targetState = background, animationSpec = tween(450), label = "fondo") { art ->
             BlurredCoverBackground(art, Modifier.fillMaxSize())
         }
 
@@ -190,17 +196,16 @@ fun NowPlayingScreen(
             Spacer(Modifier.height(24.dp))
 
             // ── Barra de progreso + tiempos
-            val progress = if (playback.durationMs > 0) {
-                (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f)
-            } else 0f
-
-            ThinSeekBar(
-                progress = progress,
-                onSeekFinished = { fraction -> onSeek((fraction * playback.durationMs).toLong()) },
+            SmoothSeekBar(
+                smooth = smooth,
+                durationMs = playback.durationMs,
+                onSeek = onSeek,
                 modifier = Modifier.fillMaxWidth(),
             )
+            // El texto solo cambia una vez por segundo (no en cada cuadro).
+            val elapsed by remember(smooth) { derivedStateOf { formatTime(smooth.displayMs) } }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(playback.positionMs), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+                Text(elapsed, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
                 Text(formatTime(playback.durationMs), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
             }
 
@@ -267,10 +272,11 @@ private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Mod
                 bitmap = cover,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
+                // Ya viene desenfocada y chiquita; al estirarla queda suave sin costo por cuadro.
+                filterQuality = FilterQuality.High,
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer { scaleX = 1.4f; scaleY = 1.4f }
-                    .blur(55.dp, BlurredEdgeTreatment.Unbounded),
+                    .graphicsLayer { scaleX = 1.25f; scaleY = 1.25f },
                 // Más color de la portada en el fondo.
                 colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.7f) }),
             )
@@ -352,51 +358,6 @@ private fun CoverArt(
         } else {
             Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(96.dp))
         }
-    }
-}
-
-/** Barra delgada con bolita blanca; se puede tocar o arrastrar. */
-@Composable
-private fun ThinSeekBar(
-    progress: Float,
-    onSeekFinished: (Float) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var widthPx by remember { mutableIntStateOf(1) }
-    var dragFraction by remember { mutableStateOf<Float?>(null) }
-    val onFinished by rememberUpdatedState(onSeekFinished)
-    val shown = dragFraction ?: progress
-
-    Box(
-        modifier
-            .height(28.dp)
-            .onSizeChanged { widthPx = it.width.coerceAtLeast(1) }
-            .pointerInput(Unit) {
-                detectTapGestures { offset -> onFinished((offset.x / widthPx).coerceIn(0f, 1f)) }
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset -> dragFraction = (offset.x / widthPx).coerceIn(0f, 1f) },
-                    onDragEnd = {
-                        dragFraction?.let(onFinished)
-                        dragFraction = null
-                    },
-                    onDragCancel = { dragFraction = null },
-                ) { change, _ ->
-                    change.consume()
-                    dragFraction = (change.position.x / widthPx).coerceIn(0f, 1f)
-                }
-            }
-    ) {
-        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(1.5.dp).background(Color.White.copy(alpha = 0.3f), CircleShape))
-        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth(shown).height(1.5.dp).background(Color.White, CircleShape))
-        Box(
-            Modifier
-                .align(Alignment.CenterStart)
-                .offset { IntOffset((shown * widthPx - 6.dp.toPx()).roundToInt(), 0) }
-                .size(12.dp)
-                .background(Color.White, CircleShape)
-        )
     }
 }
 
