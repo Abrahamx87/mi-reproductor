@@ -9,6 +9,18 @@ import org.json.JSONObject
 
 data class Playlist(val id: Long, val name: String, val songIds: List<Long>)
 
+/** Cómo ordenar la lista de canciones. */
+enum class SortMode(val label: String) {
+    RECENT("Más recientes"),
+    TITLE("Nombre (A-Z)"),
+    ARTIST("Artista (A-Z)"),
+    DURATION("Duración"),
+    MOST_PLAYED("Más escuchadas"),
+}
+
+/** Título y artista que tú corregiste dentro de Opsound. */
+data class SongEdit(val title: String, val artist: String)
+
 /**
  * Lo que Opsound guarda en tu celular: favoritos, playlists
  * y la última canción que escuchabas (para seguir donde te quedaste).
@@ -21,6 +33,63 @@ class OpsoundStore(context: Context) {
 
     var playlists by mutableStateOf(loadPlaylists())
         private set
+
+    var playCounts by mutableStateOf(loadPlayCounts())
+        private set
+
+    var sortMode by mutableStateOf(
+        runCatching { SortMode.valueOf(prefs.getString("sort", SortMode.RECENT.name)!!) }.getOrDefault(SortMode.RECENT)
+    )
+        private set
+
+    var edits by mutableStateOf(loadEdits())
+        private set
+
+    // ── Orden y "más escuchadas"
+    fun changeSort(mode: SortMode) {
+        sortMode = mode
+        prefs.edit().putString("sort", mode.name).apply()
+    }
+
+    fun countPlay(songId: Long) {
+        playCounts = playCounts + (songId to (playCounts[songId] ?: 0) + 1)
+        prefs.edit().putString("plays", playCounts.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
+    }
+
+    private fun loadPlayCounts(): Map<Long, Int> =
+        prefs.getString("plays", "").orEmpty().split(',').mapNotNull { entry ->
+            val (id, n) = entry.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+            val key = id.toLongOrNull() ?: return@mapNotNull null
+            key to (n.toIntOrNull() ?: return@mapNotNull null)
+        }.toMap()
+
+    fun sort(list: List<Song>): List<Song> = when (sortMode) {
+        SortMode.RECENT -> list
+        SortMode.TITLE -> list.sortedBy { it.title.lowercase() }
+        SortMode.ARTIST -> list.sortedWith(compareBy({ it.artist.lowercase() }, { it.title.lowercase() }))
+        SortMode.DURATION -> list.sortedByDescending { it.durationMs }
+        SortMode.MOST_PLAYED -> list.sortedByDescending { playCounts[it.id] ?: 0 }
+    }
+
+    // ── Editar información
+    fun saveEdit(songId: Long, edit: SongEdit?) {
+        edits = if (edit == null) edits - songId else edits + (songId to edit)
+        val json = JSONObject()
+        edits.forEach { (id, e) -> json.put(id.toString(), JSONObject().put("t", e.title).put("a", e.artist)) }
+        prefs.edit().putString("edits", json.toString()).apply()
+    }
+
+    private fun loadEdits(): Map<Long, SongEdit> = runCatching {
+        val json = JSONObject(prefs.getString("edits", "{}")!!)
+        json.keys().asSequence().mapNotNull { key ->
+            val o = json.getJSONObject(key)
+            key.toLongOrNull()?.let { it to SongEdit(o.getString("t"), o.getString("a")) }
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    fun applyEdits(list: List<Song>): List<Song> = list.map { song ->
+        edits[song.id]?.let { song.copy(title = it.title, artist = it.artist) } ?: song
+    }
 
     // ── Favoritos
     fun isFavorite(songId: Long) = songId in favorites
@@ -35,16 +104,16 @@ class OpsoundStore(context: Context) {
             .split(',').mapNotNull { it.toLongOrNull() }.toSet()
 
     // ── Playlists
-    fun createPlaylist(name: String, firstSongId: Long? = null): Playlist {
-        val playlist = Playlist(System.currentTimeMillis(), name.trim(), listOfNotNull(firstSongId))
+    fun createPlaylist(name: String, songIds: List<Long> = emptyList()): Playlist {
+        val playlist = Playlist(System.currentTimeMillis(), name.trim(), songIds.distinct())
         playlists = playlists + playlist
         savePlaylists()
         return playlist
     }
 
-    fun addToPlaylist(playlistId: Long, songId: Long) {
-        playlists = playlists.map {
-            if (it.id == playlistId && songId !in it.songIds) it.copy(songIds = it.songIds + songId) else it
+    fun addToPlaylist(playlistId: Long, songIds: List<Long>) {
+        playlists = playlists.map { p ->
+            if (p.id == playlistId) p.copy(songIds = (p.songIds + songIds).distinct()) else p
         }
         savePlaylists()
     }

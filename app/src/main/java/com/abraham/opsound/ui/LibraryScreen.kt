@@ -34,6 +34,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AddToQueue
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.QueuePlayNext
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.Sort
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.abraham.opsound.SortMode
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Folder
@@ -92,6 +101,9 @@ private data class OpenGroup(val tab: LibraryTab, val key: String, val title: St
 
 private data class Group(val key: String, val title: String, val subtitle: String, val songs: List<Song>)
 
+/** Acciones para varias canciones elegidas a la vez. */
+enum class BulkAction { PLAY_NEXT, QUEUE, PLAYLIST, FAVORITE, DELETE }
+
 @Composable
 fun LibraryScreen(
     songs: List<Song>?,
@@ -104,6 +116,7 @@ fun LibraryScreen(
     onSongOptions: (song: Song, playlistId: Long?) -> Unit,
     onNewPlaylist: () -> Unit,
     onPlaylistOptions: (playlistId: Long) -> Unit,
+    onBulk: (action: BulkAction, songs: List<Song>) -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(LibraryTab.SONGS) }
     var openKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -118,17 +131,38 @@ fun LibraryScreen(
 
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+    var selected by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    val selecting = selected.isNotEmpty()
 
-    BackHandler(enabled = searching || open != null) {
-        if (searching) {
-            searching = false; query = ""
-        } else {
-            openKey = null
+    BackHandler(enabled = selecting || searching || open != null) {
+        when {
+            selecting -> selected = emptySet()
+            searching -> { searching = false; query = "" }
+            else -> openKey = null
         }
     }
 
     val all = songs.orEmpty()
     val byId = remember(songs) { all.associateBy { it.id } }
+    val q = query.normalizeForSearch()
+
+    // La lista de canciones que se ve ahora (null si se ven artistas, álbumes, carpetas o playlists).
+    val visible: List<Song>? = when {
+        songs == null -> null
+        searching -> if (q.isBlank()) emptyList()
+            else all.filter { it.title.normalizeForSearch().contains(q) || it.artist.normalizeForSearch().contains(q) }
+        open != null -> groupSongs(open, all, byId, store).let { if (open.tab == LibraryTab.PLAYLISTS) it else store.sort(it) }
+        tab == LibraryTab.SONGS -> store.sort(all)
+        tab == LibraryTab.FAVORITES -> store.sort(all.filter { store.isFavorite(it.id) })
+        else -> null
+    }
+    val source = when {
+        searching -> "Búsqueda"
+        open != null -> open.title
+        tab == LibraryTab.FAVORITES -> "Favoritos"
+        else -> "Tu música"
+    }
+    val canSort = !searching && (open == null || open.tab != LibraryTab.PLAYLISTS)
 
     Column(
         Modifier
@@ -138,6 +172,16 @@ fun LibraryScreen(
     ) {
         // ── Encabezado
         when {
+            selecting -> SelectionBar(
+                count = selected.size,
+                onClose = { selected = emptySet() },
+                onSelectAll = { selected = visible.orEmpty().map { it.id }.toSet() },
+                onAction = { action ->
+                    val chosen = visible.orEmpty().filter { it.id in selected }
+                    onBulk(action, chosen)
+                    selected = emptySet()
+                },
+            )
             searching -> SearchBar(query, { query = it }, onClose = { searching = false; query = "" })
             open != null -> Row(
                 Modifier.fillMaxWidth().padding(start = 4.dp, top = 8.dp, end = 4.dp),
@@ -172,7 +216,7 @@ fun LibraryScreen(
             }
         }
 
-        if (!searching && open == null) {
+        if (!searching && open == null && !selecting) {
             TabChips(selected = tab, onSelect = { tab = it; openKey = null })
         }
 
@@ -180,64 +224,92 @@ fun LibraryScreen(
             when {
                 songs == null -> CircularProgressIndicator(color = Accent, modifier = Modifier.align(Alignment.Center))
 
-                searching -> {
-                    val q = query.normalizeForSearch()
-                    val results = remember(songs, q) {
-                        if (q.isBlank()) emptyList()
-                        else all.filter { it.title.normalizeForSearch().contains(q) || it.artist.normalizeForSearch().contains(q) }
-                    }
-                    when {
-                        q.isBlank() -> Hint("Escribe el nombre de una canción o artista.")
-                        results.isEmpty() -> Hint("No hay canciones que coincidan con \"$query\".")
-                        else -> SongList(results, "${results.size} resultados", playback, store,
-                            onClick = { i -> onPlay(results, i, "Búsqueda") },
-                            onOptions = { onSongOptions(it, null) })
-                    }
-                }
-
-                open != null -> {
-                    val list = groupSongs(open, all, byId, store)
-                    val playlistId = if (open.tab == LibraryTab.PLAYLISTS) open.key.toLongOrNull() else null
-                    if (list.isEmpty()) {
-                        Hint(if (playlistId != null) "Esta playlist está vacía.\nEn cualquier canción toca ⋮ › Agregar a playlist." else "No hay canciones aquí.")
-                    } else {
-                        SongList(list, "${list.size} canciones", playback, store,
-                            onClick = { i -> onPlay(list, i, open.title) },
-                            onOptions = { onSongOptions(it, playlistId) })
+                visible != null -> when {
+                    searching && q.isBlank() -> Hint("Escribe el nombre de una canción o artista.")
+                    searching && visible.isEmpty() -> Hint("No hay canciones que coincidan con \"$query\".")
+                    all.isEmpty() -> Hint("No encontré canciones en tu celular.\nGuarda música (MP3, M4A…) en la carpeta Música o Descargas.")
+                    visible.isEmpty() && open?.tab == LibraryTab.PLAYLISTS ->
+                        Hint("Esta playlist está vacía.\nEn cualquier canción toca ⋮ › Agregar a playlist.")
+                    visible.isEmpty() && tab == LibraryTab.FAVORITES && open == null ->
+                        Hint("Aún no tienes favoritos.\nToca el ❤ en el reproductor para guardar una canción aquí.")
+                    visible.isEmpty() -> Hint("No hay canciones aquí.")
+                    else -> {
+                        val playlistId = if (open?.tab == LibraryTab.PLAYLISTS) open.key.toLongOrNull() else null
+                        SongList(
+                            list = visible,
+                            header = if (searching) "${visible.size} resultados" else cantidad(visible.size),
+                            playback = playback,
+                            store = store,
+                            selected = selected,
+                            showSort = canSort,
+                            onClick = { i ->
+                                if (selecting) selected = selected.toggle(visible[i].id)
+                                else onPlay(visible, i, source)
+                            },
+                            onLongClick = { i -> selected = selected.toggle(visible[i].id) },
+                            onOptions = { onSongOptions(it, playlistId) },
+                        )
                     }
                 }
 
                 all.isEmpty() -> Hint("No encontré canciones en tu celular.\nGuarda música (MP3, M4A…) en la carpeta Música o Descargas.")
 
-                else -> when (tab) {
-                    LibraryTab.SONGS -> SongList(all, "${all.size} canciones", playback, store,
-                        onClick = { i -> onPlay(all, i, "Tu música") },
-                        onOptions = { onSongOptions(it, null) })
+                tab == LibraryTab.PLAYLISTS -> PlaylistList(store, byId, onNewPlaylist) { p ->
+                    openKey = p.id.toString(); openTitle = p.name
+                }
 
-                    LibraryTab.FAVORITES -> {
-                        val favs = all.filter { store.isFavorite(it.id) }
-                        if (favs.isEmpty()) Hint("Aún no tienes favoritos.\nToca el ❤ en el reproductor para guardar una canción aquí.")
-                        else SongList(favs, "${favs.size} favoritos", playback, store,
-                            onClick = { i -> onPlay(favs, i, "Favoritos") },
-                            onOptions = { onSongOptions(it, null) })
-                    }
-
-                    LibraryTab.PLAYLISTS -> PlaylistList(store, byId, onNewPlaylist) { p ->
-                        openKey = p.id.toString(); openTitle = p.name
-                    }
-
-                    else -> {
-                        val groups = remember(songs, tab) { buildGroups(tab, all) }
-                        GroupList(tab, groups) { g -> openKey = g.key; openTitle = g.title }
-                    }
+                else -> {
+                    val groups = remember(songs, tab) { buildGroups(tab, all) }
+                    GroupList(tab, groups) { g -> openKey = g.key; openTitle = g.title }
                 }
             }
         }
 
-        if (playback.song != null) {
+        if (playback.song != null && !selecting) {
             MiniPlayer(playback, position, onOpenPlayer, onPlayPause)
         }
         Spacer(Modifier.navigationBarsPadding())
+    }
+}
+
+private fun Set<Long>.toggle(id: Long) = if (id in this) this - id else this + id
+
+@Composable
+private fun SelectionBar(count: Int, onClose: () -> Unit, onSelectAll: () -> Unit, onAction: (BulkAction) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) { Icon(Icons.Rounded.Close, contentDescription = "Cancelar selección", tint = Color.White) }
+            Text(
+                if (count == 1) "1 seleccionada" else "$count seleccionadas",
+                color = Color.White,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onSelectAll) { Text("Todas", color = Accent) }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            BulkButton(Icons.Rounded.QueuePlayNext, "Siguiente") { onAction(BulkAction.PLAY_NEXT) }
+            BulkButton(Icons.Rounded.AddToQueue, "A la fila") { onAction(BulkAction.QUEUE) }
+            BulkButton(Icons.AutoMirrored.Rounded.PlaylistAdd, "Playlist") { onAction(BulkAction.PLAYLIST) }
+            BulkButton(Icons.Rounded.FavoriteBorder, "Favoritos") { onAction(BulkAction.FAVORITE) }
+            BulkButton(Icons.Rounded.Delete, "Eliminar", FavoriteColor) { onAction(BulkAction.DELETE) }
+        }
+    }
+}
+
+@Composable
+private fun BulkButton(icon: ImageVector, label: String, color: Color = Color.White, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = color, fontSize = 12.sp)
     }
 }
 
@@ -305,41 +377,86 @@ private fun SongList(
     header: String,
     playback: PlaybackUi,
     store: OpsoundStore,
+    selected: Set<Long>,
+    showSort: Boolean,
     onClick: (Int) -> Unit,
+    onLongClick: (Int) -> Unit,
     onOptions: (Song) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 8.dp)) {
         item {
-            Text(
-                header,
-                color = Color.White.copy(alpha = 0.55f),
-                fontSize = 14.sp,
-                modifier = Modifier.padding(start = 20.dp, top = 4.dp, bottom = 6.dp),
-            )
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(header, color = Color.White.copy(alpha = 0.55f), fontSize = 14.sp, modifier = Modifier.weight(1f))
+                if (showSort) SortButton(store)
+            }
         }
         itemsIndexed(list, key = { _, song -> song.id }) { index, song ->
             SongRow(
                 song = song,
                 isCurrent = song.id == playback.song?.id,
                 isFavorite = store.isFavorite(song.id),
+                isSelected = song.id in selected,
+                selecting = selected.isNotEmpty(),
                 onClick = { onClick(index) },
+                onLongClick = { onLongClick(index) },
                 onOptions = { onOptions(song) },
             )
         }
     }
 }
 
+@Composable
+private fun SortButton(store: OpsoundStore) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        TextButton(onClick = { open = true }) {
+            Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = null, tint = Color.White.copy(alpha = 0.8f), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(store.sortMode.label, color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            SortMode.entries.forEach { mode ->
+                DropdownMenuItem(
+                    text = { Text(mode.label, color = if (mode == store.sortMode) Accent else Color.Unspecified) },
+                    onClick = { store.changeSort(mode); open = false },
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SongRow(song: Song, isCurrent: Boolean, isFavorite: Boolean, onClick: () -> Unit, onOptions: () -> Unit) {
+private fun SongRow(
+    song: Song,
+    isCurrent: Boolean,
+    isFavorite: Boolean,
+    isSelected: Boolean,
+    selecting: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onOptions: () -> Unit,
+) {
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onOptions)
+            .background(if (isSelected) Accent.copy(alpha = 0.16f) else Color.Transparent)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(start = 20.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        SmallCover(song, 52.dp)
+        Box {
+            SmallCover(song, 52.dp)
+            if (isSelected) {
+                Box(
+                    Modifier.size(52.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.55f)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.CheckCircle, contentDescription = "Seleccionada", tint = Accent, modifier = Modifier.size(28.dp)) }
+            }
+        }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
             Text(
@@ -364,8 +481,12 @@ private fun SongRow(song: Song, isCurrent: Boolean, isFavorite: Boolean, onClick
                 )
             }
         }
-        IconButton(onClick = onOptions) {
-            Icon(Icons.Rounded.MoreVert, contentDescription = "Opciones", tint = Color.White.copy(alpha = 0.6f))
+        if (!selecting) {
+            IconButton(onClick = onOptions) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Opciones", tint = Color.White.copy(alpha = 0.6f))
+            }
+        } else {
+            Spacer(Modifier.width(48.dp))
         }
     }
 }
@@ -473,7 +594,7 @@ private fun MiniPlayer(playback: PlaybackUi, position: () -> Long, onOpen: () ->
             .background(Color(0xFF141C23))
             .clickable(onClick = onOpen)
     ) {
-        SmoothProgressLine(smooth, playback.durationMs, Modifier.fillMaxWidth())
+        SmoothProgressLine(smooth, playback.durationMs, Modifier.fillMaxWidth(), color = Accent)
         Row(
             Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,

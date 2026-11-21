@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.AddToQueue
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.HideImage
@@ -91,6 +92,7 @@ fun SongOptionsDialog(
     onRemoveFromPlaylist: () -> Unit,
     onChangeCover: () -> Unit,
     onRemoveCover: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -115,6 +117,7 @@ fun SongOptionsDialog(
                 IconOption(Icons.AutoMirrored.Rounded.PlaylistAdd, "Agregar a playlist") { onAddToPlaylist() }
                 if (inPlaylist) IconOption(Icons.Rounded.RemoveCircleOutline, "Quitar de esta playlist") { onRemoveFromPlaylist() }
                 HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Color.White.copy(alpha = 0.08f))
+                IconOption(Icons.Rounded.Edit, "Editar información") { onEdit() }
                 IconOption(Icons.Rounded.Image, "Cambiar portada") { onChangeCover() }
                 if (hasCustomCover) IconOption(Icons.Rounded.HideImage, "Quitar portada personalizada") { onRemoveCover() }
                 IconOption(Icons.Rounded.Delete, "Eliminar del celular", FavoriteColor) { onDelete() }
@@ -210,6 +213,93 @@ fun ConfirmSongDeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () 
         title = { Text("¿Eliminar \"$title\"?") },
         text = { Text("Se mueve a la papelera de tu celular. Podrás recuperarla desde ahí durante unos días.") },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Eliminar", color = FavoriteColor) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+@Composable
+fun EditInfoDialog(
+    title: String,
+    artist: String,
+    isEdited: Boolean,
+    onSave: (title: String, artist: String) -> Unit,
+    onRestore: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var newTitle by remember { mutableStateOf(title) }
+    var newArtist by remember { mutableStateOf(artist) }
+    val colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, cursorColor = Accent, focusedLabelColor = Accent)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Editar información") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = newTitle,
+                    onValueChange = { newTitle = it.take(120) },
+                    label = { Text("Título") },
+                    singleLine = true,
+                    colors = colors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.size(12.dp))
+                OutlinedTextField(
+                    value = newArtist,
+                    onValueChange = { newArtist = it.take(120) },
+                    label = { Text("Artista") },
+                    singleLine = true,
+                    colors = colors,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "Solo cambia cómo se ve en Opsound; tu archivo no se modifica.",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.6f),
+                )
+                if (isEdited) {
+                    TextButton(onClick = onRestore) { Text("Restaurar original", color = FavoriteColor) }
+                }
+            }
+        },
+        confirmButton = {
+            val ok = newTitle.isNotBlank()
+            TextButton(onClick = { if (ok) onSave(newTitle.trim(), newArtist.trim().ifEmpty { "Artista desconocido" }) }, enabled = ok) {
+                Text("Guardar", color = if (ok) Accent else Color.Gray)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+@Composable
+fun PasteLyricsDialog(onSave: (String) -> Unit, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pegar letra") },
+        text = {
+            Column {
+                Text(
+                    "Pega la letra. Si trae tiempos como [01:23.45], se mostrará sincronizada.",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.size(8.dp))
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    placeholder = { Text("Escribe o pega aquí…") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, cursorColor = Accent),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp, max = 320.dp),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.isNotBlank()) onSave(text) }, enabled = text.isNotBlank()) {
+                Text("Guardar", color = if (text.isNotBlank()) Accent else Color.Gray)
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }

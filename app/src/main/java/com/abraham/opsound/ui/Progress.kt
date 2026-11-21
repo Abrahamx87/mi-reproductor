@@ -101,6 +101,7 @@ fun SmoothSeekBar(
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
     trackHeight: Float = 1.5f,
+    activeColor: Color = Color.White,
 ) {
     val scope = rememberCoroutineScope()
     val seek by rememberUpdatedState(onSeek)
@@ -157,18 +158,18 @@ fun SmoothSeekBar(
         val stroke = trackHeight.dp.toPx()
         val x = fraction * size.width
         drawLine(Color.White.copy(alpha = 0.3f), Offset(0f, y), Offset(size.width, y), stroke, StrokeCap.Round)
-        drawLine(Color.White, Offset(0f, y), Offset(x, y), stroke, StrokeCap.Round)
+        drawLine(activeColor, Offset(0f, y), Offset(x, y), stroke, StrokeCap.Round)
         drawCircle(Color.White, radius = thumbSize.toPx() / 2f, center = Offset(x.coerceIn(0f, size.width), y))
     }
 }
 
 /** Línea de progreso del mini reproductor (sin bolita). */
 @Composable
-fun SmoothProgressLine(smooth: SmoothPosition, durationMs: Long, modifier: Modifier = Modifier) {
+fun SmoothProgressLine(smooth: SmoothPosition, durationMs: Long, modifier: Modifier = Modifier, color: Color = Color.White) {
     val duration by rememberUpdatedState(durationMs)
     Canvas(modifier.height(2.dp)) {
         val fraction = if (duration > 0) (smooth.displayMs.toFloat() / duration).coerceIn(0f, 1f) else 0f
         drawRect(Color.White.copy(alpha = 0.15f))
-        drawRect(Color.White, size = size.copy(width = size.width * fraction))
+        drawRect(color, size = size.copy(width = size.width * fraction))
     }
 }

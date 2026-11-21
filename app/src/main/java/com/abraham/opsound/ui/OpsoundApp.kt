@@ -76,6 +76,11 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Timeline
 import com.abraham.opsound.CustomCovers
+import com.abraham.opsound.Lyrics
+import com.abraham.opsound.LyricsStore
+import com.abraham.opsound.SongEdit
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.CompositionLocalProvider
 import com.abraham.opsound.Song
 import com.abraham.opsound.loadSongs
 import com.abraham.opsound.toMediaItem
@@ -84,7 +89,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 val AppBackground = Color(0xFF070B0F)
-val Accent = Color(0xFF4FC3F7)
 val FavoriteColor = Color(0xFFFF4D6D)
 
 private fun audioPermission(): String =
@@ -217,14 +221,16 @@ private fun readPlayback(player: Player, songsById: Map<String, Song>): Playback
 @Composable
 private fun PlayerApp() {
     val context = LocalContext.current
-    var songs by remember { mutableStateOf<List<Song>?>(null) }
+    val store = remember { OpsoundStore(context.applicationContext) }
+    remember { CustomCovers.init(context.applicationContext); LyricsStore.init(context.applicationContext); 0 }
+    var rawSongs by remember { mutableStateOf<List<Song>?>(null) }
     LaunchedEffect(Unit) {
-        songs = withContext(Dispatchers.IO) { runCatching { loadSongs(context) }.getOrDefault(emptyList()) }
+        rawSongs = withContext(Dispatchers.IO) { runCatching { loadSongs(context) }.getOrDefault(emptyList()) }
     }
+    // Aplica los títulos/artistas que corregiste.
+    val songs = remember(rawSongs, store.edits) { rawSongs?.let { store.applyEdits(it) } }
     val songsById = remember(songs) { songs.orEmpty().associateBy { it.id.toString() } }
 
-    val store = remember { OpsoundStore(context.applicationContext) }
-    remember { CustomCovers.init(context.applicationContext); 0 }
     val scope = rememberCoroutineScope()
     var playingFrom by rememberSaveable { mutableStateOf(store.savedSource) }
 
@@ -246,10 +252,16 @@ private fun PlayerApp() {
             }
         }
         var tick = 0
+        var lastSongId = -1L
+        var counted = false
         while (true) {
             val fresh = readPlayback(player, songsById)
             if (fresh != ui) ui = fresh
             positionMs = player.currentPosition.coerceAtLeast(0)
+            // Cuenta una reproducción cuando escuchas al menos 10 segundos.
+            val currentId = ui.song?.id ?: -1L
+            if (currentId != lastSongId) { lastSongId = currentId; counted = false }
+            if (!counted && currentId >= 0 && positionMs > 10_000) { store.countPlay(currentId); counted = true }
             tick++
             if (tick % 10 == 0) {
                 ui.song?.let { store.saveProgress(it.id, positionMs) }
@@ -291,25 +303,29 @@ private fun PlayerApp() {
         store.saveQueue(ids, playingFrom)
     }
 
-    fun enqueue(song: Song, next: Boolean) {
+    fun enqueue(list: List<Song>, next: Boolean) {
         val player = controller ?: return
+        if (list.isEmpty()) return
+        val items = list.map { it.toMediaItem() }
         if (player.mediaItemCount == 0) {
-            player.setMediaItem(song.toMediaItem())
+            player.setMediaItems(items)
             player.prepare()
             player.play()
             playingFrom = "Tu fila"
         } else if (next) {
-            player.addMediaItem(player.currentMediaItemIndex + 1, song.toMediaItem())
+            player.addMediaItems(player.currentMediaItemIndex + 1, items)
         } else {
-            player.addMediaItem(song.toMediaItem())
+            player.addMediaItems(items)
         }
         saveQueueNow()
+        val what = if (list.size == 1) "Canción" else "${list.size} canciones"
         Toast.makeText(
             context,
-            if (next) "Sonará después de la canción actual" else "Agregada al final de la fila",
+            if (next) "$what después de la actual" else "$what al final de la fila",
             Toast.LENGTH_SHORT,
         ).show()
     }
+    fun enqueue(song: Song, next: Boolean) = enqueue(listOf(song), next)
 
     // ── Cambiar portada: eliges una imagen de tu galería
     var coverFor by remember { mutableStateOf<Song?>(null) }
@@ -331,46 +347,79 @@ private fun PlayerApp() {
     }
 
     // ── Eliminar: Android pide confirmación y la manda a la papelera
-    var deleting by remember { mutableStateOf<Song?>(null) }
-    fun onDeleted(song: Song) {
-        songs = songs?.filterNot { it.id == song.id }
+    var deleting by remember { mutableStateOf<List<Song>>(emptyList()) }
+    fun onDeleted(list: List<Song>) {
+        val ids = list.map { it.id }.toSet()
+        rawSongs = rawSongs?.filterNot { it.id in ids }
         controller?.let { player ->
             for (i in player.mediaItemCount - 1 downTo 0) {
-                if (player.getMediaItemAt(i).mediaId == song.id.toString()) player.removeMediaItem(i)
+                if (player.getMediaItemAt(i).mediaId.toLongOrNull()?.let { it in ids } == true) player.removeMediaItem(i)
             }
         }
-        if (store.isFavorite(song.id)) store.toggleFavorite(song.id)
-        store.playlists.forEach { p -> if (song.id in p.songIds) store.removeFromPlaylist(p.id, song.id) }
-        CustomCovers.remove(song.id)
+        list.forEach { song ->
+            if (store.isFavorite(song.id)) store.toggleFavorite(song.id)
+            store.playlists.forEach { p -> if (song.id in p.songIds) store.removeFromPlaylist(p.id, song.id) }
+            if (CustomCovers.has(song.id)) CustomCovers.remove(song.id)
+        }
         saveQueueNow()
-        Toast.makeText(context, "\"${song.title}\" se movió a la papelera", Toast.LENGTH_SHORT).show()
+        val msg = if (list.size == 1) "\"${list.first().title}\" se movió a la papelera" else "${list.size} canciones se movieron a la papelera"
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
     }
     val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
-        val song = deleting
-        deleting = null
-        if (result.resultCode == Activity.RESULT_OK && song != null) onDeleted(song)
+        val list = deleting
+        deleting = emptyList()
+        if (result.resultCode == Activity.RESULT_OK && list.isNotEmpty()) onDeleted(list)
     }
-    fun requestDelete(song: Song) {
+    fun requestDelete(list: List<Song>) {
+        if (list.isEmpty()) return
         val resolver = context.contentResolver
         val sender = if (Build.VERSION.SDK_INT >= 30) {
-            MediaStore.createTrashRequest(resolver, listOf(song.uri), true).intentSender
+            MediaStore.createTrashRequest(resolver, list.map { it.uri }, true).intentSender
         } else {
             try {
-                resolver.delete(song.uri, null, null)
-                onDeleted(song)
+                list.forEach { resolver.delete(it.uri, null, null) }
+                onDeleted(list)
                 return
             } catch (e: RecoverableSecurityException) {
                 e.userAction.actionIntent.intentSender
             }
         }
-        deleting = song
+        deleting = list
         deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
     }
 
+    // ── Editar información
+    var editing by remember { mutableStateOf<Song?>(null) }
+
+    // ── Letras: la que viene en el archivo o la que tú agregas
+    val currentSong = ui.song
+    val lyrics by produceState<Lyrics?>(null, currentSong?.id, LyricsStore.version) {
+        value = currentSong?.let { song -> withContext(Dispatchers.IO) { runCatching { LyricsStore.load(context, song) }.getOrNull() } }
+    }
+    var pastingLyricsFor by remember { mutableStateOf<Song?>(null) }
+    var lyricsFileFor by remember { mutableStateOf<Song?>(null) }
+    val lyricsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val song = lyricsFileFor
+        lyricsFileFor = null
+        if (uri != null && song != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { runCatching { LyricsStore.importFile(context, song.id, uri) }.isSuccess }
+                Toast.makeText(context, if (ok) "Letra agregada" else "No se pudo leer ese archivo", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    fun pickLyricsFile(song: Song) {
+        lyricsFileFor = song
+        lyricsPicker.launch(arrayOf("*/*"))
+    }
+
+    // ── Color de la app según la portada que suena
+    val accent by rememberDynamicAccent(rememberArtwork(currentSong, 1024))
+
     // Ventanitas de opciones
     var optionsFor by remember { mutableStateOf<Pair<Song, Long?>?>(null) }
-    var pickPlaylistFor by remember { mutableStateOf<Song?>(null) }
-    var newPlaylistFor by remember { mutableStateOf<Song?>(null) }
+    var pickPlaylistFor by remember { mutableStateOf<List<Song>?>(null) }
+    var newPlaylistFor by remember { mutableStateOf<List<Song>?>(null) }
     var creatingPlaylist by remember { mutableStateOf(false) }
     var playlistOptions by remember { mutableStateOf<Long?>(null) }
     var renamingPlaylist by remember { mutableStateOf<Long?>(null) }
@@ -389,6 +438,8 @@ private fun PlayerApp() {
         }
     }
 
+    // Todo lo de abajo usa el color sacado de la portada.
+    CompositionLocalProvider(LocalAccent provides accent) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
         val scope = rememberCoroutineScope()
@@ -419,6 +470,18 @@ private fun PlayerApp() {
             onSongOptions = { song, playlistId -> optionsFor = song to playlistId },
             onNewPlaylist = { creatingPlaylist = true },
             onPlaylistOptions = { playlistOptions = it },
+            onBulk = { action, list ->
+                when (action) {
+                    BulkAction.PLAY_NEXT -> enqueue(list, next = true)
+                    BulkAction.QUEUE -> enqueue(list, next = false)
+                    BulkAction.PLAYLIST -> pickPlaylistFor = list
+                    BulkAction.FAVORITE -> {
+                        list.forEach { if (!store.isFavorite(it.id)) store.toggleFavorite(it.id) }
+                        Toast.makeText(context, "Agregadas a favoritos", Toast.LENGTH_SHORT).show()
+                    }
+                    BulkAction.DELETE -> requestDelete(list)
+                }
+            },
             onOpenPlayer = { showPlayer = true },
             onPlayPause = ::playPause,
         )
@@ -466,10 +529,16 @@ private fun PlayerApp() {
                     playingFrom = playingFrom,
                     isFavorite = ui.song?.let { store.isFavorite(it.id) } ?: false,
                     onToggleFavorite = { ui.song?.let { store.toggleFavorite(it.id) } },
-                    onAddToPlaylist = { pickPlaylistFor = ui.song },
+                    onAddToPlaylist = { pickPlaylistFor = ui.song?.let { listOf(it) } },
                     position = position,
                     onOpenQueue = { showQueue = true },
                     onChangeCover = { ui.song?.let { pickCover(it) } },
+                    onEditInfo = { editing = ui.song },
+                    lyrics = lyrics,
+                    hasSavedLyrics = ui.song?.let { LyricsStore.version >= 0 && LyricsStore.hasSaved(it.id) } ?: false,
+                    onLoadLyricsFile = { ui.song?.let { pickLyricsFile(it) } },
+                    onPasteLyrics = { pastingLyricsFor = ui.song },
+                    onRemoveLyrics = { ui.song?.let { LyricsStore.remove(it.id) } },
                     onPlayPause = ::playPause,
                     onPrevious = { player?.seekToPrevious() },
                     onNext = { player?.seekToNext() },
@@ -500,6 +569,27 @@ private fun PlayerApp() {
         }
     }
 
+    editing?.let { song ->
+        EditInfoDialog(
+            title = song.title,
+            artist = song.artist,
+            isEdited = store.edits.containsKey(song.id),
+            onSave = { t, a -> store.saveEdit(song.id, SongEdit(t, a)); editing = null },
+            onRestore = { store.saveEdit(song.id, null); editing = null },
+            onDismiss = { editing = null },
+        )
+    }
+    pastingLyricsFor?.let { song ->
+        PasteLyricsDialog(
+            onSave = { text ->
+                LyricsStore.saveText(context, song.id, text)
+                pastingLyricsFor = null
+                Toast.makeText(context, "Letra guardada", Toast.LENGTH_SHORT).show()
+            },
+            onDismiss = { pastingLyricsFor = null },
+        )
+    }
+
     if (showQueue) {
         QueueSheet(
             queue = queue,
@@ -521,22 +611,24 @@ private fun PlayerApp() {
             onAddToQueue = { enqueue(song, next = false); optionsFor = null },
             onChangeCover = { optionsFor = null; pickCover(song) },
             onRemoveCover = { CustomCovers.remove(song.id); optionsFor = null },
-            onDelete = { optionsFor = null; requestDelete(song) },
+            onDelete = { optionsFor = null; requestDelete(listOf(song)) },
+            onEdit = { optionsFor = null; editing = song },
             onToggleFavorite = { store.toggleFavorite(song.id); optionsFor = null },
-            onAddToPlaylist = { pickPlaylistFor = song; optionsFor = null },
+            onAddToPlaylist = { pickPlaylistFor = listOf(song); optionsFor = null },
             onRemoveFromPlaylist = { playlistId?.let { store.removeFromPlaylist(it, song.id) }; optionsFor = null },
             onDismiss = { optionsFor = null },
         )
     }
-    pickPlaylistFor?.let { song ->
+    pickPlaylistFor?.let { list ->
         PlaylistPickerDialog(
             playlists = store.playlists,
             onPick = { p ->
-                store.addToPlaylist(p.id, song.id)
-                Toast.makeText(context, "Agregada a ${p.name}", Toast.LENGTH_SHORT).show()
+                store.addToPlaylist(p.id, list.map { it.id })
+                val what = if (list.size == 1) "Agregada" else "${list.size} canciones agregadas"
+                Toast.makeText(context, "$what a ${p.name}", Toast.LENGTH_SHORT).show()
                 pickPlaylistFor = null
             },
-            onNew = { newPlaylistFor = song; pickPlaylistFor = null },
+            onNew = { newPlaylistFor = list; pickPlaylistFor = null },
             onDismiss = { pickPlaylistFor = null },
         )
     }
@@ -546,9 +638,9 @@ private fun PlayerApp() {
             initial = "",
             confirmLabel = "Crear",
             onConfirm = { name ->
-                val song = newPlaylistFor
-                store.createPlaylist(name, song?.id)
-                if (song != null) Toast.makeText(context, "Agregada a $name", Toast.LENGTH_SHORT).show()
+                val list = newPlaylistFor
+                store.createPlaylist(name, list.orEmpty().map { it.id })
+                if (!list.isNullOrEmpty()) Toast.makeText(context, "Playlist \"$name\" creada", Toast.LENGTH_SHORT).show()
                 creatingPlaylist = false; newPlaylistFor = null
             },
             onDismiss = { creatingPlaylist = false; newPlaylistFor = null },
@@ -580,5 +672,6 @@ private fun PlayerApp() {
             onConfirm = { store.deletePlaylist(id); deletingPlaylist = null },
             onDismiss = { deletingPlaylist = null },
         )
+    }
     }
 }

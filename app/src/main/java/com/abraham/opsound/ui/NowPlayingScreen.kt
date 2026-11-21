@@ -29,6 +29,9 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.abraham.opsound.Lyrics
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.animation.core.Animatable
@@ -106,7 +109,14 @@ fun NowPlayingScreen(
     position: () -> Long,
     onOpenQueue: () -> Unit,
     onChangeCover: () -> Unit,
+    onEditInfo: () -> Unit,
+    lyrics: Lyrics?,
+    hasSavedLyrics: Boolean,
+    onLoadLyricsFile: () -> Unit,
+    onPasteLyrics: () -> Unit,
+    onRemoveLyrics: () -> Unit,
 ) {
+    var showLyrics by rememberSaveable { mutableStateOf(false) }
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
     val background = rememberBlurredBackground(song, cover)
@@ -154,6 +164,12 @@ fun NowPlayingScreen(
                         DropdownMenuItem(text = { Text("Ver fila de reproducción") }, onClick = { menuOpen = false; onOpenQueue() })
                         DropdownMenuItem(text = { Text("Agregar a playlist") }, onClick = { menuOpen = false; onAddToPlaylist() })
                         DropdownMenuItem(text = { Text("Cambiar portada") }, onClick = { menuOpen = false; onChangeCover() })
+                        DropdownMenuItem(text = { Text("Editar información") }, onClick = { menuOpen = false; onEditInfo() })
+                        DropdownMenuItem(text = { Text("Letra: cargar archivo .lrc") }, onClick = { menuOpen = false; onLoadLyricsFile() })
+                        DropdownMenuItem(text = { Text("Letra: pegar texto") }, onClick = { menuOpen = false; onPasteLyrics() })
+                        if (hasSavedLyrics) {
+                            DropdownMenuItem(text = { Text("Quitar letra guardada") }, onClick = { menuOpen = false; onRemoveLyrics() })
+                        }
                         DropdownMenuItem(text = { Text("Compartir canción") }, onClick = { menuOpen = false; onShare() })
                         DropdownMenuItem(text = { Text("Volver a la biblioteca") }, onClick = { menuOpen = false; onClose() })
                     }
@@ -163,7 +179,21 @@ fun NowPlayingScreen(
             Spacer(Modifier.height(34.dp))
 
             // ── Portada grande con esquinas redondeadas
-            CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f), onTap = onPlayPause, onSwipeLeft = onNext, onSwipeRight = onPrevious)
+            // Portada o letra (se cambian con el botón de letra de abajo).
+            Crossfade(targetState = showLyrics, animationSpec = tween(250), label = "portada-letra") { lyricsMode ->
+                if (lyricsMode) {
+                    LyricsView(
+                        lyrics = lyrics,
+                        smooth = smooth,
+                        onSeek = onSeek,
+                        onLoadFile = onLoadLyricsFile,
+                        onPaste = onPasteLyrics,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+                    )
+                } else {
+                    CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f), onTap = onPlayPause, onSwipeLeft = onNext, onSwipeRight = onPrevious)
+                }
+            }
 
             Spacer(Modifier.height(34.dp))
 
@@ -204,6 +234,7 @@ fun NowPlayingScreen(
 
             // ── Barra de progreso + tiempos
             SmoothSeekBar(
+                activeColor = Accent,
                 smooth = smooth,
                 durationMs = playback.durationMs,
                 onSeek = onSeek,
@@ -226,7 +257,7 @@ fun NowPlayingScreen(
             ) {
                 IconButton(onClick = onToggleShuffle) {
                     Icon(
-                        Icons.Rounded.Shuffle, contentDescription = "Aleatorio", tint = Color.White,
+                        Icons.Rounded.Shuffle, contentDescription = "Aleatorio", tint = if (playback.shuffle) Accent else Color.White,
                         modifier = Modifier.size(28.dp).alpha(if (playback.shuffle) 1f else 0.35f),
                     )
                 }
@@ -253,14 +284,22 @@ fun NowPlayingScreen(
                 IconButton(onClick = onCycleLoop) {
                     Icon(
                         if (playback.loop == LoopMode.ONE) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                        contentDescription = "Repetir", tint = Color.White,
+                        contentDescription = "Repetir", tint = if (playback.loop == LoopMode.OFF) Color.White else Accent,
                         modifier = Modifier.size(28.dp).alpha(if (playback.loop == LoopMode.OFF) 0.35f else 1f),
                     )
                 }
             }
 
             // ── Lista de canciones (abajo a la derecha)
-            Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.End) {
+            Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = { showLyrics = !showLyrics }) {
+                    Icon(
+                        Icons.Rounded.Subtitles,
+                        contentDescription = if (showLyrics) "Ver portada" else "Ver letra",
+                        tint = if (showLyrics) Accent else Color.White.copy(alpha = if (lyrics != null) 1f else 0.5f),
+                        modifier = Modifier.size(28.dp),
+                    )
+                }
                 IconButton(onClick = onOpenQueue) {
                     Icon(Icons.Rounded.FormatListBulleted, contentDescription = "Fila de reproducción", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
