@@ -47,6 +47,17 @@ object CustomCovers {
         version++
     }
 
+    /** Portadas que vienen incluidas en Opsound (carpeta assets/covers). */
+    val presets = listOf("covers/preset_1.jpg", "covers/preset_2.jpg", "covers/preset_3.jpg")
+
+    /** Usa una de las portadas incluidas. (Llamar fuera del hilo principal.) */
+    fun setPreset(context: Context, songId: Long, asset: String) {
+        init(context)
+        val target = File(dir, "$songId.jpg")
+        context.assets.open(asset).use { input -> target.outputStream().use { input.copyTo(it) } }
+        version++
+    }
+
     fun remove(songId: Long) {
         file(songId)?.delete()
         version++

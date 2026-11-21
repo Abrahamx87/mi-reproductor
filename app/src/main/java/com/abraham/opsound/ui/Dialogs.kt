@@ -1,6 +1,20 @@
 package com.abraham.opsound.ui
 
 import androidx.compose.foundation.clickable
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
@@ -301,5 +315,52 @@ fun PasteLyricsDialog(onSave: (String) -> Unit, onDismiss: () -> Unit) {
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+/** Cambiar portada: elegir una de las predeterminadas o importar de la galería. */
+@Composable
+fun CoverChooserDialog(
+    presets: List<String>,
+    onPreset: (String) -> Unit,
+    onGallery: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cambiar portada") },
+        text = {
+            Column {
+                Text("Usar portada predeterminada", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.size(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    presets.forEach { asset ->
+                        val thumb = remember(asset) {
+                            runCatching {
+                                context.assets.open(asset).use {
+                                    BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = 4 })
+                                }?.asImageBitmap()
+                            }.getOrNull()
+                        }
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .aspectRatio(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .clickable { onPreset(asset) },
+                        ) {
+                            if (thumb != null) {
+                                Image(thumb, contentDescription = "Portada predeterminada", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Color.White.copy(alpha = 0.08f))
+                IconOption(Icons.Rounded.PhotoLibrary, "Importar de galería") { onGallery() }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Accent) } },
     )
 }

@@ -341,7 +341,12 @@ private fun PlayerApp() {
             }
         }
     }
+    // Primero se abre la ventanita con las 2 opciones: predeterminadas o galería.
+    var choosingCoverFor by remember { mutableStateOf<Song?>(null) }
     fun pickCover(song: Song) {
+        choosingCoverFor = song
+    }
+    fun pickFromGallery(song: Song) {
         coverFor = song
         coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
@@ -567,6 +572,21 @@ private fun PlayerApp() {
                 )
             }
         }
+    }
+
+    choosingCoverFor?.let { song ->
+        CoverChooserDialog(
+            presets = CustomCovers.presets,
+            onPreset = { asset ->
+                choosingCoverFor = null
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { runCatching { CustomCovers.setPreset(context, song.id, asset) }.isSuccess }
+                    Toast.makeText(context, if (ok) "Portada cambiada" else "No se pudo cambiar la portada", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onGallery = { choosingCoverFor = null; pickFromGallery(song) },
+            onDismiss = { choosingCoverFor = null },
+        )
     }
 
     editing?.let { song ->
