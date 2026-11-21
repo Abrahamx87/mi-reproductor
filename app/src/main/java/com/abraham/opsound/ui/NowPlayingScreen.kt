@@ -104,6 +104,8 @@ fun NowPlayingScreen(
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
     position: () -> Long,
+    onOpenQueue: () -> Unit,
+    onChangeCover: () -> Unit,
 ) {
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
@@ -149,7 +151,9 @@ fun NowPlayingScreen(
                         Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones", tint = Color.White)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Ver fila de reproducción") }, onClick = { menuOpen = false; onOpenQueue() })
                         DropdownMenuItem(text = { Text("Agregar a playlist") }, onClick = { menuOpen = false; onAddToPlaylist() })
+                        DropdownMenuItem(text = { Text("Cambiar portada") }, onClick = { menuOpen = false; onChangeCover() })
                         DropdownMenuItem(text = { Text("Compartir canción") }, onClick = { menuOpen = false; onShare() })
                         DropdownMenuItem(text = { Text("Volver a la biblioteca") }, onClick = { menuOpen = false; onClose() })
                     }
@@ -257,8 +261,8 @@ fun NowPlayingScreen(
 
             // ── Lista de canciones (abajo a la derecha)
             Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.End) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Rounded.FormatListBulleted, contentDescription = "Lista de canciones", tint = Color.White, modifier = Modifier.size(30.dp))
+                IconButton(onClick = onOpenQueue) {
+                    Icon(Icons.Rounded.FormatListBulleted, contentDescription = "Fila de reproducción", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
             }
             Spacer(Modifier.weight(1f))

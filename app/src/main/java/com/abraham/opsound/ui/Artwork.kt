@@ -1,6 +1,8 @@
 package com.abraham.opsound.ui
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.abraham.opsound.CustomCovers
 import android.util.LruCache
 import android.util.Size
 import androidx.compose.runtime.Composable
@@ -19,14 +21,15 @@ private object ArtCache {
     val cache = object : LruCache<String, ImageBitmap>(48 * 1024 * 1024) {
         override fun sizeOf(key: String, value: ImageBitmap) = value.width * value.height * 4
     }
-    val blurred = LruCache<Long, ImageBitmap>(12)
+    val blurred = LruCache<String, ImageBitmap>(12)
 }
 
 /** Carga la portada que viene dentro del archivo de la canción. */
 @Composable
 fun rememberArtwork(song: Song?, sizePx: Int): ImageBitmap? {
     val context = LocalContext.current
-    val key = song?.let { "${it.id}:$sizePx" }
+    val coverVersion = CustomCovers.version
+    val key = song?.let { "${it.id}:$sizePx:$coverVersion" }
     val art by produceState(initialValue = key?.let { ArtCache.cache.get(it) }, key) {
         if (song == null || key == null) {
             value = null
@@ -35,9 +38,20 @@ fun rememberArtwork(song: Song?, sizePx: Int): ImageBitmap? {
         ArtCache.cache.get(key)?.let { value = it; return@produceState }
         value = withContext(Dispatchers.IO) {
             runCatching {
-                context.contentResolver
-                    .loadThumbnail(song.uri, Size(sizePx, sizePx), null)
-                    .asImageBitmap()
+                // Primero la portada que tú elegiste; si no hay, la que trae el archivo.
+                val custom = CustomCovers.file(song.id)
+                if (custom != null) {
+                    val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                    BitmapFactory.decodeFile(custom.path, opts)
+                    var sample = 1
+                    while (opts.outWidth / (sample * 2) >= sizePx) sample *= 2
+                    BitmapFactory.decodeFile(custom.path, BitmapFactory.Options().apply { inSampleSize = sample })!!
+                        .asImageBitmap()
+                } else {
+                    context.contentResolver
+                        .loadThumbnail(song.uri, Size(sizePx, sizePx), null)
+                        .asImageBitmap()
+                }
             }.getOrNull()
         }?.also { ArtCache.cache.put(key, it) }
     }
@@ -50,7 +64,8 @@ fun rememberArtwork(song: Song?, sizePx: Int): ImageBitmap? {
  */
 @Composable
 fun rememberBlurredBackground(song: Song?, cover: ImageBitmap?): ImageBitmap? {
-    val id = song?.id
+    // La clave incluye la portada exacta, para nunca mezclar el fondo de una portada vieja.
+    val id = if (song != null && cover != null) "${song.id}:${System.identityHashCode(cover)}" else null
     val bg by produceState(initialValue = id?.let { ArtCache.blurred.get(it) }, id, cover) {
         if (id == null || cover == null) {
             value = null

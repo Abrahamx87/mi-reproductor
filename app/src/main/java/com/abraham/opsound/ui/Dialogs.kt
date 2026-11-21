@@ -1,6 +1,24 @@
 package com.abraham.opsound.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.AddToQueue
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.HideImage
+import androidx.compose.material.icons.rounded.Image
+import androidx.compose.material.icons.rounded.QueuePlayNext
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -43,24 +61,63 @@ private fun Option(text: String, color: Color = Color.White, onClick: () -> Unit
     )
 }
 
+/** Opción con ícono, grande y fácil de tocar. */
+@Composable
+private fun IconOption(icon: ImageVector, text: String, color: Color = Color.White, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(24.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(text, color = color, fontSize = 16.sp)
+    }
+}
+
 @Composable
 fun SongOptionsDialog(
     title: String,
+    subtitle: String,
     isFavorite: Boolean,
     inPlaylist: Boolean,
+    hasCustomCover: Boolean,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit,
     onRemoveFromPlaylist: () -> Unit,
+    onChangeCover: () -> Unit,
+    onRemoveCover: () -> Unit,
+    onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-        text = {
+        title = {
             Column {
-                Option(if (isFavorite) "♡  Quitar de favoritos" else "❤  Agregar a favoritos") { onToggleFavorite() }
-                Option("＋  Agregar a playlist") { onAddToPlaylist() }
-                if (inPlaylist) Option("✕  Quitar de esta playlist", FavoriteColor) { onRemoveFromPlaylist() }
+                Text(title, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, fontSize = 14.sp, color = Color.White.copy(alpha = 0.6f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                IconOption(Icons.Rounded.QueuePlayNext, "Reproducir siguiente") { onPlayNext() }
+                IconOption(Icons.Rounded.AddToQueue, "Agregar a la fila") { onAddToQueue() }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Color.White.copy(alpha = 0.08f))
+                IconOption(
+                    if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    if (isFavorite) "Quitar de favoritos" else "Agregar a favoritos",
+                    if (isFavorite) FavoriteColor else Color.White,
+                ) { onToggleFavorite() }
+                IconOption(Icons.AutoMirrored.Rounded.PlaylistAdd, "Agregar a playlist") { onAddToPlaylist() }
+                if (inPlaylist) IconOption(Icons.Rounded.RemoveCircleOutline, "Quitar de esta playlist") { onRemoveFromPlaylist() }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = Color.White.copy(alpha = 0.08f))
+                IconOption(Icons.Rounded.Image, "Cambiar portada") { onChangeCover() }
+                if (hasCustomCover) IconOption(Icons.Rounded.HideImage, "Quitar portada personalizada") { onRemoveCover() }
+                IconOption(Icons.Rounded.Delete, "Eliminar del celular", FavoriteColor) { onDelete() }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar", color = Accent) } },
@@ -142,6 +199,17 @@ fun ConfirmDeleteDialog(name: String, onConfirm: () -> Unit, onDismiss: () -> Un
         title = { Text("¿Borrar \"$name\"?") },
         text = { Text("Solo se borra la playlist. Tus canciones no se tocan.") },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Borrar", color = FavoriteColor) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+    )
+}
+
+@Composable
+fun ConfirmSongDeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Eliminar \"$title\"?") },
+        text = { Text("Se mueve a la papelera de tu celular. Podrás recuperarla desde ahí durante unos días.") },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("Eliminar", color = FavoriteColor) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }

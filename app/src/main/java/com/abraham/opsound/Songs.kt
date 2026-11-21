@@ -33,7 +33,7 @@ fun Song.toMediaItem(): MediaItem =
                 .setTitle(title)
                 .setArtist(artist)
                 .setAlbumTitle(album)
-                .setArtworkUri(artUri)
+                .setArtworkUri(CustomCovers.file(id)?.let { Uri.fromFile(it) } ?: artUri)
                 .build()
         )
         .build()

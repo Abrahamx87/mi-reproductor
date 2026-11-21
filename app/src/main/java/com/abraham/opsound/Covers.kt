@@ -1,0 +1,54 @@
+package com.abraham.opsound
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.ImageDecoder
+import android.net.Uri
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import java.io.File
+
+/**
+ * Portadas que tú eliges desde la galería. Se guardan dentro de Opsound
+ * (no modifican el archivo de música original).
+ */
+object CustomCovers {
+    private var dir: File? = null
+
+    /** Cambia cada vez que pones o quitas una portada, para refrescar la pantalla. */
+    var version by mutableIntStateOf(0)
+        private set
+
+    fun init(context: Context) {
+        if (dir == null) dir = File(context.filesDir, "covers").apply { mkdirs() }
+    }
+
+    fun file(songId: Long): File? = dir?.let { File(it, "$songId.jpg") }?.takeIf { it.exists() }
+
+    fun has(songId: Long) = file(songId) != null
+
+    /** Copia la imagen elegida, recortada en cuadrado y a buen tamaño. (Llamar fuera del hilo principal.) */
+    fun set(context: Context, songId: Long, image: Uri) {
+        init(context)
+        val source = ImageDecoder.createSource(context.contentResolver, image)
+        val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val longest = maxOf(info.size.width, info.size.height)
+            if (longest > 1600) {
+                val scale = 1600f / longest
+                decoder.setTargetSize((info.size.width * scale).toInt(), (info.size.height * scale).toInt())
+            }
+        }
+        val side = minOf(bitmap.width, bitmap.height)
+        val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
+        val target = File(dir, "$songId.jpg")
+        target.outputStream().use { square.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        version++
+    }
+
+    fun remove(songId: Long) {
+        file(songId)?.delete()
+        version++
+    }
+}

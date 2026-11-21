@@ -67,6 +67,15 @@ import androidx.media3.session.SessionToken
 import com.abraham.opsound.OpsoundStore
 import com.abraham.opsound.PlaybackService
 import android.widget.Toast
+import android.app.Activity
+import android.app.RecoverableSecurityException
+import android.provider.MediaStore
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Timeline
+import com.abraham.opsound.CustomCovers
 import com.abraham.opsound.Song
 import com.abraham.opsound.loadSongs
 import com.abraham.opsound.toMediaItem
@@ -215,6 +224,8 @@ private fun PlayerApp() {
     val songsById = remember(songs) { songs.orEmpty().associateBy { it.id.toString() } }
 
     val store = remember { OpsoundStore(context.applicationContext) }
+    remember { CustomCovers.init(context.applicationContext); 0 }
+    val scope = rememberCoroutineScope()
     var playingFrom by rememberSaveable { mutableStateOf(store.savedSource) }
 
     val controller = rememberMediaController()
@@ -245,6 +256,115 @@ private fun PlayerApp() {
             }
             delay(200)
         }
+    }
+
+    // ── Fila de reproducción (se actualiza sola cuando cambia)
+    var queue by remember { mutableStateOf<List<Song>>(emptyList()) }
+    var queueIndex by remember { mutableIntStateOf(0) }
+    var showQueue by remember { mutableStateOf(false) }
+    DisposableEffect(controller, songsById) {
+        val player = controller ?: return@DisposableEffect onDispose { }
+        fun refresh() {
+            queue = (0 until player.mediaItemCount).map { i ->
+                val item = player.getMediaItemAt(i)
+                songsById[item.mediaId] ?: Song(
+                    id = item.mediaId.toLongOrNull() ?: -1L,
+                    title = item.mediaMetadata.title?.toString() ?: "Canción",
+                    artist = item.mediaMetadata.artist?.toString() ?: "",
+                    album = "", albumId = -1L, durationMs = 0L, folder = "",
+                )
+            }
+            queueIndex = player.currentMediaItemIndex
+        }
+        val listener = object : Player.Listener {
+            override fun onTimelineChanged(timeline: Timeline, reason: Int) = refresh()
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) = refresh()
+        }
+        refresh()
+        player.addListener(listener)
+        onDispose { player.removeListener(listener) }
+    }
+
+    fun saveQueueNow() {
+        val player = controller ?: return
+        val ids = (0 until player.mediaItemCount).mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        store.saveQueue(ids, playingFrom)
+    }
+
+    fun enqueue(song: Song, next: Boolean) {
+        val player = controller ?: return
+        if (player.mediaItemCount == 0) {
+            player.setMediaItem(song.toMediaItem())
+            player.prepare()
+            player.play()
+            playingFrom = "Tu fila"
+        } else if (next) {
+            player.addMediaItem(player.currentMediaItemIndex + 1, song.toMediaItem())
+        } else {
+            player.addMediaItem(song.toMediaItem())
+        }
+        saveQueueNow()
+        Toast.makeText(
+            context,
+            if (next) "Sonará después de la canción actual" else "Agregada al final de la fila",
+            Toast.LENGTH_SHORT,
+        ).show()
+    }
+
+    // ── Cambiar portada: eliges una imagen de tu galería
+    var coverFor by remember { mutableStateOf<Song?>(null) }
+    val coverPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val song = coverFor
+        coverFor = null
+        if (uri != null && song != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching { CustomCovers.set(context, song.id, uri) }.isSuccess
+                }
+                Toast.makeText(context, if (ok) "Portada cambiada" else "No se pudo usar esa imagen", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    fun pickCover(song: Song) {
+        coverFor = song
+        coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    // ── Eliminar: Android pide confirmación y la manda a la papelera
+    var deleting by remember { mutableStateOf<Song?>(null) }
+    fun onDeleted(song: Song) {
+        songs = songs?.filterNot { it.id == song.id }
+        controller?.let { player ->
+            for (i in player.mediaItemCount - 1 downTo 0) {
+                if (player.getMediaItemAt(i).mediaId == song.id.toString()) player.removeMediaItem(i)
+            }
+        }
+        if (store.isFavorite(song.id)) store.toggleFavorite(song.id)
+        store.playlists.forEach { p -> if (song.id in p.songIds) store.removeFromPlaylist(p.id, song.id) }
+        CustomCovers.remove(song.id)
+        saveQueueNow()
+        Toast.makeText(context, "\"${song.title}\" se movió a la papelera", Toast.LENGTH_SHORT).show()
+    }
+    val deleteLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val song = deleting
+        deleting = null
+        if (result.resultCode == Activity.RESULT_OK && song != null) onDeleted(song)
+    }
+    fun requestDelete(song: Song) {
+        val resolver = context.contentResolver
+        val sender = if (Build.VERSION.SDK_INT >= 30) {
+            MediaStore.createTrashRequest(resolver, listOf(song.uri), true).intentSender
+        } else {
+            try {
+                resolver.delete(song.uri, null, null)
+                onDeleted(song)
+                return
+            } catch (e: RecoverableSecurityException) {
+                e.userAction.actionIntent.intentSender
+            }
+        }
+        deleting = song
+        deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
     }
 
     // Ventanitas de opciones
@@ -347,8 +467,10 @@ private fun PlayerApp() {
                     isFavorite = ui.song?.let { store.isFavorite(it.id) } ?: false,
                     onToggleFavorite = { ui.song?.let { store.toggleFavorite(it.id) } },
                     onAddToPlaylist = { pickPlaylistFor = ui.song },
+                    onAddToPlaylist = { pickPlaylistFor = ui.song },
                     position = position,
-                    onPlayPause = ::playPause,
+                    onOpenQueue = { showQueue = true },
+                    onChangeCover = { ui.song?.let { pickCover(it) } }, = ::playPause,
                     onPrevious = { player?.seekToPrevious() },
                     onNext = { player?.seekToNext() },
                     onSeek = { player?.seekTo(it) },
@@ -378,11 +500,28 @@ private fun PlayerApp() {
         }
     }
 
+    if (showQueue) {
+        QueueSheet(
+            queue = queue,
+            currentIndex = queueIndex,
+            onJumpTo = { i -> controller?.let { it.seekTo(i, 0L); it.play() } },
+            onRemove = { i -> controller?.removeMediaItem(i); saveQueueNow() },
+            onDismiss = { showQueue = false },
+        )
+    }
+
     optionsFor?.let { (song, playlistId) ->
         SongOptionsDialog(
             title = song.title,
+            subtitle = song.artist,
             isFavorite = store.isFavorite(song.id),
             inPlaylist = playlistId != null,
+            hasCustomCover = CustomCovers.version >= 0 && CustomCovers.has(song.id),
+            onPlayNext = { enqueue(song, next = true); optionsFor = null },
+            onAddToQueue = { enqueue(song, next = false); optionsFor = null },
+            onChangeCover = { optionsFor = null; pickCover(song) },
+            onRemoveCover = { CustomCovers.remove(song.id); optionsFor = null },
+            onDelete = { optionsFor = null; requestDelete(song) },
             onToggleFavorite = { store.toggleFavorite(song.id); optionsFor = null },
             onAddToPlaylist = { pickPlaylistFor = song; optionsFor = null },
             onRemoveFromPlaylist = { playlistId?.let { store.removeFromPlaylist(it, song.id) }; optionsFor = null },
