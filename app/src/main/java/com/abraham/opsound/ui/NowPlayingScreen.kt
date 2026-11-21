@@ -29,6 +29,13 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.animation.core.Animatable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
@@ -89,6 +96,9 @@ fun NowPlayingScreen(
     onCycleLoop: () -> Unit,
     onShare: () -> Unit,
     onClose: () -> Unit,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
+    onAddToPlaylist: () -> Unit,
 ) {
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
@@ -130,6 +140,7 @@ fun NowPlayingScreen(
                         Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones", tint = Color.White)
                     }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(text = { Text("Agregar a playlist") }, onClick = { menuOpen = false; onAddToPlaylist() })
                         DropdownMenuItem(text = { Text("Compartir canción") }, onClick = { menuOpen = false; onShare() })
                         DropdownMenuItem(text = { Text("Volver a la biblioteca") }, onClick = { menuOpen = false; onClose() })
                     }
@@ -139,7 +150,7 @@ fun NowPlayingScreen(
             Spacer(Modifier.height(34.dp))
 
             // ── Portada grande con esquinas redondeadas
-            CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f))
+            CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f), onTap = onPlayPause, onSwipeLeft = onNext, onSwipeRight = onPrevious)
 
             Spacer(Modifier.height(34.dp))
 
@@ -161,6 +172,14 @@ fun NowPlayingScreen(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Quitar de favoritos" else "Agregar a favoritos",
+                        tint = if (isFavorite) FavoriteColor else Color.White,
+                        modifier = Modifier.size(28.dp),
                     )
                 }
                 IconButton(onClick = onShare) {
@@ -284,9 +303,46 @@ private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Mod
 }
 
 @Composable
-private fun CoverArt(cover: ImageBitmap?, modifier: Modifier = Modifier) {
+private fun CoverArt(
+    cover: ImageBitmap?,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit,
+    onSwipeLeft: () -> Unit,
+    onSwipeRight: () -> Unit,
+) {
+    // Toca la portada para pausar; deslízala a los lados para cambiar de canción.
+    val dragX = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    val tap by rememberUpdatedState(onTap)
+    val left by rememberUpdatedState(onSwipeLeft)
+    val right by rememberUpdatedState(onSwipeRight)
+
     Box(
         modifier
+            .graphicsLayer {
+                translationX = dragX.value
+                alpha = 1f - (abs(dragX.value) / (size.width * 1.6f)).coerceIn(0f, 0.6f)
+            }
+            .pointerInput(Unit) { detectTapGestures(onTap = { tap() }) }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        val limit = size.width * 0.25f
+                        val moved = dragX.value
+                        scope.launch {
+                            when {
+                                moved < -limit -> left()
+                                moved > limit -> right()
+                            }
+                            dragX.animateTo(0f)
+                        }
+                    },
+                    onDragCancel = { scope.launch { dragX.animateTo(0f) } },
+                ) { change, amount ->
+                    change.consume()
+                    scope.launch { dragX.snapTo(dragX.value + amount) }
+                }
+            }
             .clip(RoundedCornerShape(12.dp))
             .background(Color.White.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,

@@ -23,12 +23,20 @@ jobs:
         with:
           gradle-version: '8.14.3'
 
-      # Guarda la misma llave de firma entre armados para poder actualizar la app sin desinstalar.
-      - name: Llave de firma
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: opsound-debug-keystore-v1
+      # Llave de firma fija (guardada como secreto en GitHub) para poder actualizar sin desinstalar.
+      - name: Preparar llave de firma
+        env:
+          FIRMA: ${{ secrets.OPSOUND_FIRMA }}
+        run: |
+          if [ -z "$FIRMA" ]; then
+            echo "::error::Falta el secreto OPSOUND_FIRMA en Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          PASS="${FIRMA%%:*}"
+          echo "::add-mask::$PASS"
+          printf '%s' "${FIRMA#*:}" | base64 -d > "$RUNNER_TEMP/opsound.p12"
+          echo "OPSOUND_KEYSTORE=$RUNNER_TEMP/opsound.p12" >> "$GITHUB_ENV"
+          echo "OPSOUND_KEY_PASS=$PASS" >> "$GITHUB_ENV"
 
       - name: Armar APK
         run: gradle assembleDebug --no-daemon --stacktrace

@@ -62,7 +62,9 @@ import androidx.media3.common.C
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import com.abraham.opsound.OpsoundStore
 import com.abraham.opsound.PlaybackService
+import android.widget.Toast
 import com.abraham.opsound.Song
 import com.abraham.opsound.loadSongs
 import com.abraham.opsound.toMediaItem
@@ -72,6 +74,7 @@ import kotlinx.coroutines.withContext
 
 val AppBackground = Color(0xFF070B0F)
 val Accent = Color(0xFF4FC3F7)
+val FavoriteColor = Color(0xFFFF4D6D)
 
 private fun audioPermission(): String =
     if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
@@ -211,15 +214,42 @@ private fun PlayerApp() {
     }
     val songsById = remember(songs) { songs.orEmpty().associateBy { it.id.toString() } }
 
+    val store = remember { OpsoundStore(context.applicationContext) }
+    var playingFrom by rememberSaveable { mutableStateOf(store.savedSource) }
+
     val controller = rememberMediaController()
     var ui by remember { mutableStateOf(PlaybackUi()) }
     LaunchedEffect(controller, songsById) {
         val player = controller ?: return@LaunchedEffect
+        // Seguir donde te quedaste: recupera la última lista, canción y segundo.
+        if (player.mediaItemCount == 0 && songsById.isNotEmpty()) {
+            val queue = store.savedQueue.mapNotNull { songsById[it.toString()] }
+            if (queue.isNotEmpty()) {
+                val index = queue.indexOfFirst { it.id == store.savedSongId }.coerceAtLeast(0)
+                val position = if (queue[index].id == store.savedSongId) store.savedPosition else 0L
+                player.setMediaItems(queue.map { it.toMediaItem() }, index, position)
+                player.prepare()
+            }
+        }
+        var tick = 0
         while (true) {
             ui = readPlayback(player, songsById)
+            tick++
+            if (tick % 8 == 0) {
+                ui.song?.let { store.saveProgress(it.id, ui.positionMs) }
+            }
             delay(250)
         }
     }
+
+    // Ventanitas de opciones
+    var optionsFor by remember { mutableStateOf<Pair<Song, Long?>?>(null) }
+    var pickPlaylistFor by remember { mutableStateOf<Song?>(null) }
+    var newPlaylistFor by remember { mutableStateOf<Song?>(null) }
+    var creatingPlaylist by remember { mutableStateOf(false) }
+    var playlistOptions by remember { mutableStateOf<Long?>(null) }
+    var renamingPlaylist by remember { mutableStateOf<Long?>(null) }
+    var deletingPlaylist by remember { mutableStateOf<Long?>(null) }
 
     var showPlayer by rememberSaveable { mutableStateOf(false) }
 
@@ -250,14 +280,20 @@ private fun PlayerApp() {
         LibraryScreen(
             songs = songs,
             playback = ui,
-            onSongClick = { list, index ->
+            store = store,
+            onPlay = { list, index, source ->
                 controller?.let { player ->
                     player.setMediaItems(list.map { it.toMediaItem() }, index, 0L)
                     player.prepare()
                     player.play()
+                    playingFrom = source
+                    store.saveQueue(list.map { it.id }, source)
                     showPlayer = true
                 }
             },
+            onSongOptions = { song, playlistId -> optionsFor = song to playlistId },
+            onNewPlaylist = { creatingPlaylist = true },
+            onPlaylistOptions = { playlistOptions = it },
             onOpenPlayer = { showPlayer = true },
             onPlayPause = ::playPause,
         )
@@ -300,7 +336,10 @@ private fun PlayerApp() {
             ) {
                 NowPlayingScreen(
                     playback = ui,
-                    playingFrom = "Tu música",
+                    playingFrom = playingFrom,
+                    isFavorite = ui.song?.let { store.isFavorite(it.id) } ?: false,
+                    onToggleFavorite = { ui.song?.let { store.toggleFavorite(it.id) } },
+                    onAddToPlaylist = { pickPlaylistFor = ui.song },
                     onPlayPause = ::playPause,
                     onPrevious = { player?.seekToPrevious() },
                     onNext = { player?.seekToNext() },
@@ -329,5 +368,70 @@ private fun PlayerApp() {
                 )
             }
         }
+    }
+
+    optionsFor?.let { (song, playlistId) ->
+        SongOptionsDialog(
+            title = song.title,
+            isFavorite = store.isFavorite(song.id),
+            inPlaylist = playlistId != null,
+            onToggleFavorite = { store.toggleFavorite(song.id); optionsFor = null },
+            onAddToPlaylist = { pickPlaylistFor = song; optionsFor = null },
+            onRemoveFromPlaylist = { playlistId?.let { store.removeFromPlaylist(it, song.id) }; optionsFor = null },
+            onDismiss = { optionsFor = null },
+        )
+    }
+    pickPlaylistFor?.let { song ->
+        PlaylistPickerDialog(
+            playlists = store.playlists,
+            onPick = { p ->
+                store.addToPlaylist(p.id, song.id)
+                Toast.makeText(context, "Agregada a ${p.name}", Toast.LENGTH_SHORT).show()
+                pickPlaylistFor = null
+            },
+            onNew = { newPlaylistFor = song; pickPlaylistFor = null },
+            onDismiss = { pickPlaylistFor = null },
+        )
+    }
+    if (creatingPlaylist || newPlaylistFor != null) {
+        NameDialog(
+            title = "Nueva playlist",
+            initial = "",
+            confirmLabel = "Crear",
+            onConfirm = { name ->
+                val song = newPlaylistFor
+                store.createPlaylist(name, song?.id)
+                if (song != null) Toast.makeText(context, "Agregada a $name", Toast.LENGTH_SHORT).show()
+                creatingPlaylist = false; newPlaylistFor = null
+            },
+            onDismiss = { creatingPlaylist = false; newPlaylistFor = null },
+        )
+    }
+    playlistOptions?.let { id ->
+        val p = store.playlists.firstOrNull { it.id == id }
+        if (p == null) playlistOptions = null else PlaylistOptionsDialog(
+            name = p.name,
+            onRename = { renamingPlaylist = id; playlistOptions = null },
+            onDelete = { deletingPlaylist = id; playlistOptions = null },
+            onDismiss = { playlistOptions = null },
+        )
+    }
+    renamingPlaylist?.let { id ->
+        val p = store.playlists.firstOrNull { it.id == id }
+        NameDialog(
+            title = "Cambiar nombre",
+            initial = p?.name.orEmpty(),
+            confirmLabel = "Guardar",
+            onConfirm = { store.renamePlaylist(id, it); renamingPlaylist = null },
+            onDismiss = { renamingPlaylist = null },
+        )
+    }
+    deletingPlaylist?.let { id ->
+        val p = store.playlists.firstOrNull { it.id == id }
+        ConfirmDeleteDialog(
+            name = p?.name.orEmpty(),
+            onConfirm = { store.deletePlaylist(id); deletingPlaylist = null },
+            onDismiss = { deletingPlaylist = null },
+        )
     }
 }

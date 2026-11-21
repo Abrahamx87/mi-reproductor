@@ -14,6 +14,7 @@ data class Song(
     val album: String,
     val albumId: Long,
     val durationMs: Long,
+    val folder: String,
 ) {
     val uri: Uri
         get() = ContentUris.withAppendedId(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, id)
@@ -46,6 +47,7 @@ fun loadSongs(context: Context): List<Song> {
         MediaStore.Audio.Media.ALBUM,
         MediaStore.Audio.Media.ALBUM_ID,
         MediaStore.Audio.Media.DURATION,
+        MediaStore.Audio.Media.RELATIVE_PATH,
     )
     val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
     val sortOrder = "${MediaStore.Audio.Media.DATE_ADDED} DESC"
@@ -64,16 +66,35 @@ fun loadSongs(context: Context): List<Song> {
         val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
         val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
         val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+        val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.RELATIVE_PATH)
 
         while (cursor.moveToNext()) {
-            val artist = cursor.getString(artistCol)
+            val rawArtist = cursor.getString(artistCol)
+            var title = cursor.getString(titleCol)?.trim().orEmpty().ifEmpty { "Sin título" }
+            var artist = if (rawArtist.isNullOrBlank() || rawArtist == "<unknown>") null else rawArtist.trim()
+
+            // Si no trae artista y el nombre es "Artista - Canción", lo separamos.
+            if (artist == null) {
+                val parts = title.split(" - ", " – ", " — ", limit = 2)
+                if (parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
+                    artist = parts[0].trim()
+                    title = parts[1].trim()
+                }
+            }
+
+            val folder = cursor.getString(pathCol)
+                ?.trimEnd('/')
+                ?.substringAfterLast('/')
+                ?.ifBlank { null } ?: "Almacenamiento"
+
             songs += Song(
                 id = cursor.getLong(idCol),
-                title = cursor.getString(titleCol) ?: "Sin título",
-                artist = if (artist.isNullOrBlank() || artist == "<unknown>") "Artista desconocido" else artist,
-                album = cursor.getString(albumCol) ?: "",
+                title = title,
+                artist = artist ?: "Artista desconocido",
+                album = cursor.getString(albumCol)?.ifBlank { null } ?: folder,
                 albumId = cursor.getLong(albumIdCol),
                 durationMs = cursor.getLong(durationCol),
+                folder = folder,
             )
         }
     }

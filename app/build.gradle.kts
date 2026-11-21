@@ -19,7 +19,24 @@ android {
         versionName = "1.0.$buildNumber"
     }
 
+    // Llave fija: siempre la misma firma para que Opsound se pueda actualizar desde adentro.
+    val keystorePath = System.getenv("OPSOUND_KEYSTORE")
+    if (keystorePath != null) {
+        signingConfigs {
+            create("opsound") {
+                storeFile = file(keystorePath)
+                storeType = "PKCS12"
+                storePassword = System.getenv("OPSOUND_KEY_PASS")
+                keyAlias = "opsound"
+                keyPassword = System.getenv("OPSOUND_KEY_PASS")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (keystorePath != null) signingConfig = signingConfigs.getByName("opsound")
+        }
         release {
             isMinifyEnabled = false
         }
