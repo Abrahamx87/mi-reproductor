@@ -108,6 +108,7 @@ fun OpsoundApp() {
                 },
             )
         }
+        UpdateDialog()
     }
 }
 

@@ -1,11 +1,13 @@
 package com.abraham.opsound.ui
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,18 +24,16 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.rounded.FormatListBulleted
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
-import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Shuffle
-import androidx.compose.material.icons.rounded.SkipNext
-import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -53,7 +53,12 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,19 +110,16 @@ fun NowPlayingScreen(
                 .fillMaxSize()
                 .statusBarsPadding()
                 .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
+                .padding(horizontal = 18.dp)
         ) {
             // ── Encabezado: bajar · "Reproduciendo desde" · menú ⋮
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) {
-                    Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Cerrar", tint = Color.White, modifier = Modifier.size(32.dp))
-                }
                 Column(Modifier.weight(1f)) {
-                    Text("Reproduciendo desde", color = Color.White.copy(alpha = 0.55f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Text("Reproduciendo desde", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         playingFrom,
                         color = Color.White,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -134,12 +136,12 @@ fun NowPlayingScreen(
                 }
             }
 
-            Spacer(Modifier.weight(0.6f))
+            Spacer(Modifier.height(34.dp))
 
             // ── Portada grande con esquinas redondeadas
             CoverArt(cover, Modifier.fillMaxWidth().aspectRatio(1f))
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(34.dp))
 
             // ── Título + artista + compartir
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -147,7 +149,7 @@ fun NowPlayingScreen(
                     Text(
                         song?.title.orEmpty(),
                         color = Color.White,
-                        fontSize = 26.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -155,7 +157,8 @@ fun NowPlayingScreen(
                     Text(
                         song?.artist.orEmpty(),
                         color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 20.sp,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -165,7 +168,7 @@ fun NowPlayingScreen(
                 }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
 
             // ── Barra de progreso + tiempos
             val progress = if (playback.durationMs > 0) {
@@ -178,11 +181,11 @@ fun NowPlayingScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatTime(playback.positionMs), color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
-                Text(formatTime(playback.durationMs), color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                Text(formatTime(playback.positionMs), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
+                Text(formatTime(playback.durationMs), color = Color.White.copy(alpha = 0.8f), fontSize = 13.sp)
             }
 
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(24.dp))
 
             // ── Controles: aleatorio · anterior · play/pausa · siguiente · repetir
             Row(
@@ -196,22 +199,25 @@ fun NowPlayingScreen(
                         modifier = Modifier.size(28.dp).alpha(if (playback.shuffle) 1f else 0.35f),
                     )
                 }
-                IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp)) {
-                    Icon(Icons.Rounded.SkipPrevious, contentDescription = "Anterior", tint = Color.White, modifier = Modifier.size(44.dp))
-                }
-                IconButton(onClick = onPlayPause, modifier = Modifier.size(80.dp)) {
-                    Icon(
-                        if (playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playback.isPlaying) "Pausar" else "Reproducir",
-                        tint = Color.White,
-                        modifier = Modifier.size(72.dp),
-                    )
-                }
-                IconButton(onClick = onNext, enabled = playback.hasNext, modifier = Modifier.size(56.dp)) {
-                    Icon(
-                        Icons.Rounded.SkipNext, contentDescription = "Siguiente", tint = Color.White,
-                        modifier = Modifier.size(44.dp).alpha(if (playback.hasNext) 1f else 0.35f),
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp)) {
+                        Icon(Icons.Filled.SkipPrevious, contentDescription = "Anterior", tint = Color.White, modifier = Modifier.size(38.dp))
+                    }
+                    Spacer(Modifier.width(18.dp))
+                    IconButton(onClick = onPlayPause, modifier = Modifier.size(76.dp)) {
+                        if (playback.isPlaying) {
+                            SquarePauseIcon(Modifier.size(66.dp))
+                        } else {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = "Reproducir", tint = Color.White, modifier = Modifier.size(72.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(18.dp))
+                    IconButton(onClick = onNext, enabled = playback.hasNext, modifier = Modifier.size(52.dp)) {
+                        Icon(
+                            Icons.Filled.SkipNext, contentDescription = "Siguiente", tint = Color.White,
+                            modifier = Modifier.size(38.dp).alpha(if (playback.hasNext) 1f else 0.35f),
+                        )
+                    }
                 }
                 IconButton(onClick = onCycleLoop) {
                     Icon(
@@ -223,11 +229,12 @@ fun NowPlayingScreen(
             }
 
             // ── Lista de canciones (abajo a la derecha)
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 12.dp), horizontalArrangement = Arrangement.End) {
+            Row(Modifier.fillMaxWidth().padding(top = 22.dp), horizontalArrangement = Arrangement.End) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Rounded.QueueMusic, contentDescription = "Lista de canciones", tint = Color.White, modifier = Modifier.size(30.dp))
+                    Icon(Icons.Rounded.FormatListBulleted, contentDescription = "Lista de canciones", tint = Color.White, modifier = Modifier.size(30.dp))
                 }
             }
+            Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -244,17 +251,32 @@ private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Mod
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer { scaleX = 1.4f; scaleY = 1.4f }
-                    .blur(60.dp, BlurredEdgeTreatment.Unbounded),
+                    .blur(55.dp, BlurredEdgeTreatment.Unbounded),
+                // Más color de la portada en el fondo.
+                colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(1.7f) }),
             )
         }
+        // Orillas más oscuras (viñeta) + degradado hacia negro abajo.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        0.0f to Color.Black.copy(alpha = 0.10f),
+                        1.0f to Color.Black.copy(alpha = 0.55f),
+                        radius = 1400f,
+                        center = Offset(540f, 700f),
+                    )
+                )
+        )
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0.00f to Color.Black.copy(alpha = 0.30f),
-                        0.55f to Color.Black.copy(alpha = 0.55f),
-                        1.00f to Color.Black.copy(alpha = 0.92f),
+                        0.00f to Color.Black.copy(alpha = 0.20f),
+                        0.50f to Color.Black.copy(alpha = 0.45f),
+                        1.00f to Color.Black.copy(alpha = 0.93f),
                     )
                 )
         )
@@ -265,7 +287,7 @@ private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Mod
 private fun CoverArt(cover: ImageBitmap?, modifier: Modifier = Modifier) {
     Box(
         modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(Color.White.copy(alpha = 0.08f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -310,8 +332,8 @@ private fun ThinSeekBar(
                 }
             }
     ) {
-        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.25f), CircleShape))
-        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth(shown).height(2.dp).background(Color.White, CircleShape))
+        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth().height(1.5.dp).background(Color.White.copy(alpha = 0.3f), CircleShape))
+        Box(Modifier.align(Alignment.CenterStart).fillMaxWidth(shown).height(1.5.dp).background(Color.White, CircleShape))
         Box(
             Modifier
                 .align(Alignment.CenterStart)
@@ -319,5 +341,20 @@ private fun ThinSeekBar(
                 .size(12.dp)
                 .background(Color.White, CircleShape)
         )
+    }
+}
+
+/** Pausa con barras casi cuadradas, como en BandLab. */
+@Composable
+private fun SquarePauseIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val barW = size.width * 0.19f
+        val barH = size.height * 0.62f
+        val top = (size.height - barH) / 2f
+        val gap = size.width * 0.16f
+        val left = (size.width - (barW * 2 + gap)) / 2f
+        val r = CornerRadius(size.width * 0.04f)
+        drawRoundRect(Color.White, Offset(left, top), Size(barW, barH), r)
+        drawRoundRect(Color.White, Offset(left + barW + gap, top), Size(barW, barH), r)
     }
 }
