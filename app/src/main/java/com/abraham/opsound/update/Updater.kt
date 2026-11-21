@@ -25,16 +25,29 @@ object Updater {
     fun installedVersionCode(context: Context): Long =
         context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
 
+    // Recordamos la última respuesta: si GitHub dice "no cambió" (304) no gasta nuestro límite de consultas.
+    private var etag: String? = null
+    private var lastJson: String? = null
+
     /** Regresa la versión nueva si es mayor que la instalada; si no, null. (Llamar fuera del hilo principal.) */
     fun checkForUpdate(context: Context): UpdateInfo? {
         val conn = (URL(LATEST_RELEASE).openConnection() as HttpURLConnection).apply {
             connectTimeout = 10_000
             readTimeout = 10_000
+            useCaches = false
             setRequestProperty("Accept", "application/vnd.github+json")
+            etag?.let { setRequestProperty("If-None-Match", it) }
         }
         try {
-            if (conn.responseCode != 200) return null
-            val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+            val body = when (conn.responseCode) {
+                200 -> conn.inputStream.bufferedReader().use { it.readText() }.also {
+                    etag = conn.getHeaderField("ETag")
+                    lastJson = it
+                }
+                304 -> lastJson ?: return null
+                else -> return null
+            }
+            val json = JSONObject(body)
             val tag = json.optString("tag_name") // ejemplo: v1.0.3
             val code = tag.substringAfterLast('.').toLongOrNull() ?: return null
             if (code <= installedVersionCode(context)) return null

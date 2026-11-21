@@ -29,6 +29,12 @@ import androidx.compose.ui.unit.dp
 import com.abraham.opsound.update.UpdateInfo
 import com.abraham.opsound.update.Updater
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -48,9 +54,22 @@ fun UpdateDialog() {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<UpdateState>(UpdateState.Hidden) }
 
-    LaunchedEffect(Unit) {
-        val info = withContext(Dispatchers.IO) { runCatching { Updater.checkForUpdate(context) }.getOrNull() }
-        if (info != null) state = UpdateState.Available(info)
+    // Si tocas "Después", no vuelve a molestar con esa misma versión (sí con la siguiente).
+    var dismissedCode by rememberSaveable { mutableLongStateOf(0L) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Revisa al abrir, al regresar a la app y cada 30 s mientras la usas:
+    // la actualización te llega sin cerrar Opsound.
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val info = withContext(Dispatchers.IO) { runCatching { Updater.checkForUpdate(context) }.getOrNull() }
+                if (info != null && info.versionCode > dismissedCode && state == UpdateState.Hidden) {
+                    state = UpdateState.Available(info)
+                }
+                delay(30_000)
+            }
+        }
     }
 
     fun startUpdate(info: UpdateInfo) {
@@ -82,7 +101,7 @@ fun UpdateDialog() {
         UpdateState.Hidden -> Unit
 
         is UpdateState.Available -> AlertDialog(
-            onDismissRequest = { state = UpdateState.Hidden },
+            onDismissRequest = { dismissedCode = s.info.versionCode; state = UpdateState.Hidden },
             title = { Text("¡Nueva versión de Opsound! 🎉", fontWeight = FontWeight.Bold) },
             text = {
                 Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState())) {
@@ -95,7 +114,7 @@ fun UpdateDialog() {
                 }
             },
             confirmButton = { TextButton(onClick = { startUpdate(s.info) }) { Text("Actualizar", color = Accent) } },
-            dismissButton = { TextButton(onClick = { state = UpdateState.Hidden }) { Text("Después") } },
+            dismissButton = { TextButton(onClick = { dismissedCode = s.info.versionCode; state = UpdateState.Hidden }) { Text("Después") } },
         )
 
         is UpdateState.NeedPermission -> AlertDialog(

@@ -58,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.CornerRadius
@@ -113,6 +114,8 @@ fun NowPlayingScreen(
     Box(
         Modifier
             .fillMaxSize()
+            // Nada del fondo se puede salir del reproductor (evita la franja que quedaba colgada).
+            .clipToBounds()
             .background(AppBackground)
             // Evita que los toques pasen a la lista que está debajo.
             .pointerInput(Unit) { detectTapGestures { } }
@@ -266,7 +269,7 @@ fun NowPlayingScreen(
 /** Fondo: la portada ampliada, muy desenfocada, con un velo oscuro que baja a casi negro. */
 @Composable
 private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Modifier) {
-    Box(modifier.background(AppBackground)) {
+    Box(modifier.clipToBounds().background(AppBackground)) {
         if (cover != null) {
             Image(
                 bitmap = cover,
