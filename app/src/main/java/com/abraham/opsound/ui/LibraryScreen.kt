@@ -20,13 +20,34 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import java.text.Normalizer
+import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,26 +67,61 @@ import com.abraham.opsound.formatTime
 fun LibraryScreen(
     songs: List<Song>?,
     playback: PlaybackUi,
-    onSongClick: (Int) -> Unit,
+    onSongClick: (List<Song>, Int) -> Unit,
     onOpenPlayer: () -> Unit,
     onPlayPause: () -> Unit,
 ) {
+    var searching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val shown = remember(songs, query) {
+        val q = query.normalizeForSearch()
+        if (songs == null || q.isBlank()) songs
+        else songs.filter { it.title.normalizeForSearch().contains(q) || it.artist.normalizeForSearch().contains(q) }
+    }
+
+    BackHandler(enabled = searching) { searching = false; query = "" }
+
     Column(
         Modifier
             .fillMaxSize()
             .statusBarsPadding()
+            .imePadding()
     ) {
-        Text(
-            "Opsound",
-            color = Color.White,
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 20.dp, top = 16.dp, end = 20.dp),
-        )
+        if (searching) {
+            SearchBar(
+                query = query,
+                onQueryChange = { query = it },
+                onClose = { searching = false; query = "" },
+            )
+        } else {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Opsound",
+                    color = Color.White,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { searching = true }) {
+                    Icon(Icons.Rounded.Search, contentDescription = "Buscar", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+        }
 
         when {
             songs == null -> Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = Accent)
+            }
+
+            shown.isNullOrEmpty() && query.isNotBlank() -> Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "No hay canciones que coincidan con \"$query\"",
+                    color = Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                )
             }
 
             songs.isEmpty() -> Box(Modifier.weight(1f).fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
@@ -77,8 +133,9 @@ fun LibraryScreen(
             }
 
             else -> {
+                val list = shown ?: songs
                 Text(
-                    "${songs.size} canciones",
+                    if (query.isBlank()) "${songs.size} canciones" else "${list.size} resultados",
                     color = Color.White.copy(alpha = 0.55f),
                     fontSize = 14.sp,
                     modifier = Modifier.padding(start = 20.dp, bottom = 8.dp),
@@ -87,11 +144,11 @@ fun LibraryScreen(
                     Modifier.weight(1f).fillMaxWidth(),
                     contentPadding = PaddingValues(bottom = 8.dp),
                 ) {
-                    itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                    itemsIndexed(list, key = { _, song -> song.id }) { index, song ->
                         SongRow(
                             song = song,
                             isCurrent = song.id == playback.song?.id,
-                            onClick = { onSongClick(index) },
+                            onClick = { onSongClick(list, index) },
                         )
                     }
                 }
@@ -191,5 +248,60 @@ private fun MiniPlayer(playback: PlaybackUi, onOpen: () -> Unit, onPlayPause: ()
                 )
             }
         }
+    }
+}
+
+/** Quita acentos y mayúsculas para que "cancion" encuentre "Canción". */
+private fun String.normalizeForSearch(): String =
+    Normalizer.normalize(this, Normalizer.Form.NFD)
+        .replace(Regex("\\p{Mn}+"), "")
+        .lowercase()
+        .trim()
+
+@Composable
+private fun SearchBar(query: String, onQueryChange: (String) -> Unit, onClose: () -> Unit) {
+    val focus = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(Unit) { focus.requestFocus() }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            Modifier
+                .weight(1f)
+                .height(48.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.10f))
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.Search, contentDescription = null, tint = Color.White.copy(alpha = 0.7f))
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) {
+                    Text("Buscar canción o artista", color = Color.White.copy(alpha = 0.45f), fontSize = 16.sp)
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 16.sp, fontFamily = Montserrat),
+                    cursorBrush = SolidColor(Accent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                    modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                )
+            }
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Rounded.Close, contentDescription = "Borrar", tint = Color.White.copy(alpha = 0.7f))
+                }
+            }
+        }
+        TextButton(onClick = onClose) { Text("Cancelar", color = Color.White) }
     }
 }

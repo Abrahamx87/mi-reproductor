@@ -11,9 +11,19 @@ import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -211,7 +222,6 @@ private fun PlayerApp() {
     }
 
     var showPlayer by rememberSaveable { mutableStateOf(false) }
-    BackHandler(enabled = showPlayer) { showPlayer = false }
 
     fun playPause() {
         val player = controller ?: return
@@ -224,12 +234,23 @@ private fun PlayerApp() {
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val heightPx = with(LocalDensity.current) { maxHeight.toPx() }
+        val scope = rememberCoroutineScope()
+        // 0 = reproductor arriba (visible); heightPx = escondido abajo.
+        val offsetY = remember { Animatable(if (showPlayer) 0f else heightPx) }
+        LaunchedEffect(showPlayer, heightPx) {
+            offsetY.animateTo(
+                if (showPlayer) 0f else heightPx,
+                tween(durationMillis = 420, easing = FastOutSlowInEasing),
+            )
+        }
+        val openFraction = (1f - offsetY.value / heightPx).coerceIn(0f, 1f)
+
         LibraryScreen(
             songs = songs,
             playback = ui,
-            onSongClick = { index ->
-                val list = songs ?: return@LibraryScreen
+            onSongClick = { list, index ->
                 controller?.let { player ->
                     player.setMediaItems(list.map { it.toMediaItem() }, index, 0L)
                     player.prepare()
@@ -241,41 +262,72 @@ private fun PlayerApp() {
             onPlayPause = ::playPause,
         )
 
-        AnimatedVisibility(
-            visible = showPlayer && ui.song != null,
-            enter = slideInVertically { it },
-            exit = slideOutVertically { it },
-        ) {
-            val player = controller
-            NowPlayingScreen(
-                playback = ui,
-                playingFrom = "Tu música",
-                onPlayPause = ::playPause,
-                onPrevious = { player?.seekToPrevious() },
-                onNext = { player?.seekToNext() },
-                onSeek = { player?.seekTo(it) },
-                onToggleShuffle = { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
-                onCycleLoop = {
-                    player?.let {
-                        it.repeatMode = when (it.repeatMode) {
-                            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
-                            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
-                            else -> Player.REPEAT_MODE_OFF
-                        }
-                    }
-                },
-                onShare = {
-                    ui.song?.let { song ->
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "audio/*"
-                            putExtra(Intent.EXTRA_STREAM, song.uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(send, "Compartir canción"))
-                    }
-                },
-                onClose = { showPlayer = false },
+        // Oscurece la lista mientras el reproductor sube o baja (transición suave).
+        if (openFraction > 0f) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = openFraction * 0.7f }
+                    .background(Color.Black)
             )
+        }
+
+        if (ui.song != null && offsetY.value < heightPx) {
+            val player = controller
+            BackHandler(enabled = showPlayer) { showPlayer = false }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .offset { IntOffset(0, offsetY.value.roundToInt()) }
+                    // Deslizar el dedo hacia abajo baja el reproductor siguiendo tu dedo.
+                    .draggable(
+                        orientation = Orientation.Vertical,
+                        state = rememberDraggableState { delta ->
+                            scope.launch { offsetY.snapTo((offsetY.value + delta).coerceIn(0f, heightPx)) }
+                        },
+                        onDragStopped = { velocity ->
+                            if (offsetY.value > heightPx * 0.22f || velocity > 1800f) {
+                                if (showPlayer) {
+                                    showPlayer = false
+                                } else {
+                                    offsetY.animateTo(heightPx, tween(300, easing = FastOutSlowInEasing))
+                                }
+                            } else {
+                                offsetY.animateTo(0f, tween(300, easing = FastOutSlowInEasing))
+                            }
+                        },
+                    )
+            ) {
+                NowPlayingScreen(
+                    playback = ui,
+                    playingFrom = "Tu música",
+                    onPlayPause = ::playPause,
+                    onPrevious = { player?.seekToPrevious() },
+                    onNext = { player?.seekToNext() },
+                    onSeek = { player?.seekTo(it) },
+                    onToggleShuffle = { player?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } },
+                    onCycleLoop = {
+                        player?.let {
+                            it.repeatMode = when (it.repeatMode) {
+                                Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+                                Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+                                else -> Player.REPEAT_MODE_OFF
+                            }
+                        }
+                    },
+                    onShare = {
+                        ui.song?.let { song ->
+                            val send = Intent(Intent.ACTION_SEND).apply {
+                                type = "audio/*"
+                                putExtra(Intent.EXTRA_STREAM, song.uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(send, "Compartir canción"))
+                        }
+                    },
+                    onClose = { showPlayer = false },
+                )
+            }
         }
     }
 }
