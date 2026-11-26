@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+
 package com.abraham.opsound.ui
 
 import androidx.compose.animation.AnimatedVisibility
@@ -14,6 +16,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -140,12 +143,13 @@ fun LyricsView(
     onGenerateAi: () -> Unit,
     onLoadFile: () -> Unit,
     onPaste: () -> Unit,
+    onShareLine: (LyricLine) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier.pointerInput(Unit) { detectTapGestures { onTapEmpty() } }) {
         when {
             lyrics == null || lyrics.lines.isEmpty() -> EmptyLyrics(status, hasAiKey, onSearchOnline, onGenerateAi, onLoadFile, onPaste)
-            lyrics.synced -> SyncedLyrics(lyrics, smooth, durationMs, onSeek)
+            lyrics.synced -> SyncedLyrics(lyrics, smooth, durationMs, onSeek, onShareLine)
             else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 16.dp)) {
                 // Letra sin tiempos: la IA puede sincronizarla palabra por palabra.
                 if (status == LyricsStatus.Generating) {
@@ -168,11 +172,13 @@ fun LyricsView(
                 lyrics.lines.forEach { line ->
                     Text(
                         line.text,
+                        modifier = Modifier
+                            .combinedClickable(onClick = {}, onLongClick = { if (line.text.isNotBlank()) onShareLine(line) })
+                            .padding(vertical = 6.dp),
                         color = Color.White.copy(alpha = if (line.text.isBlank()) 0f else 0.9f),
                         fontSize = 24.sp,
                         lineHeight = 30.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(vertical = 6.dp),
                     )
                 }
 
@@ -182,7 +188,7 @@ fun LyricsView(
 }
 
 @Composable
-private fun SyncedLyrics(lyrics: Lyrics, smooth: SmoothPosition, durationMs: Long, onSeek: (Long) -> Unit) {
+private fun SyncedLyrics(lyrics: Lyrics, smooth: SmoothPosition, durationMs: Long, onSeek: (Long) -> Unit, onShareLine: (LyricLine) -> Unit) {
     val rows = remember(lyrics, durationMs) { buildRows(lyrics.lines, durationMs) }
     val current by remember(rows) {
         derivedStateOf {
@@ -224,7 +230,11 @@ private fun SyncedLyrics(lyrics: Lyrics, smooth: SmoothPosition, durationMs: Lon
                             transformOrigin = TransformOrigin(0f, 0.5f)
                         }
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { manual = false; onSeek(row.startMs) }
+                        // Toca para saltar ahí; mantén presionado para compartir la letra (como Apple Music).
+                        .combinedClickable(
+                            onClick = { manual = false; onSeek(row.startMs) },
+                            onLongClick = { if (row is Row2.Line) onShareLine(row.line) },
+                        )
                         .padding(vertical = 10.dp, horizontal = 4.dp),
                 ) {
                     when (row) {

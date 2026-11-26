@@ -145,6 +145,8 @@ fun NowPlayingScreen(
         }
     }
     LaunchedEffect(showLyrics) { if (!showLyrics) controlsVisible = true }
+    // Compartir letra: índice de la línea con la que se abrió (-1 = cerrado).
+    var shareFrom by remember { mutableStateOf<Int?>(null) }
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
     val background = rememberBlurredBackground(song, cover)
@@ -184,6 +186,14 @@ fun NowPlayingScreen(
                     DropdownMenuItem(text = { Text("Letra: pegar texto") }, onClick = { menuOpen = false; onPasteLyrics() })
                     if (hasSavedLyrics) {
                         DropdownMenuItem(text = { Text("Quitar letra guardada") }, onClick = { menuOpen = false; onRemoveLyrics() })
+                    }
+                    if (lyrics != null && lyrics.lines.any { it.text.isNotBlank() }) {
+                        DropdownMenuItem(text = { Text("Compartir letra") }, onClick = {
+                            menuOpen = false
+                            val t = smooth.displayMs
+                            val shareLines = lyrics.lines.filter { it.text.isNotBlank() }
+                            shareFrom = shareLines.indexOfLast { (it.timeMs ?: 0L) <= t }.coerceAtLeast(0)
+                        })
                     }
                     DropdownMenuItem(text = { Text("Compartir canción") }, onClick = { menuOpen = false; onShare() })
                     DropdownMenuItem(text = { Text("Volver a la biblioteca") }, onClick = { menuOpen = false; onClose() })
@@ -377,6 +387,10 @@ fun NowPlayingScreen(
                     onGenerateAi = onGenerateLyrics,
                     onLoadFile = onLoadLyricsFile,
                     onPaste = onPasteLyrics,
+                    onShareLine = { line ->
+                        val shareLines = lyrics?.lines.orEmpty().filter { it.text.isNotBlank() }
+                        shareFrom = shareLines.indexOf(line).coerceAtLeast(0)
+                    },
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
 
@@ -388,6 +402,17 @@ fun NowPlayingScreen(
                     Column(Modifier.padding(top = 8.dp, bottom = 4.dp)) { controls() }
                 }
             }
+        }
+        shareFrom?.let { start ->
+            val shareLines = lyrics?.lines.orEmpty().filter { it.text.isNotBlank() }.map { it.text }
+            ShareLyricsScreen(
+                lines = shareLines,
+                startIndex = start,
+                cover = cover,
+                title = song?.title.orEmpty(),
+                artist = song?.artist.orEmpty(),
+                onDismiss = { shareFrom = null },
+            )
         }
     }
 }
