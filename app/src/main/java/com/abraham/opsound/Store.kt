@@ -53,9 +53,9 @@ class OpsoundStore(context: Context) {
     var aiKey by mutableStateOf(prefs.getString("ai_key", "").orEmpty())
         private set
 
-    fun setAutoLyrics(on: Boolean) { autoLyrics = on; prefs.edit().putBoolean("auto_lyrics", on).apply() }
-    fun setAnimatedCovers(on: Boolean) { animatedCovers = on; prefs.edit().putBoolean("animated_covers", on).apply() }
-    fun setAiKey(key: String) { aiKey = key.trim(); prefs.edit().putString("ai_key", aiKey).apply() }
+    fun changeAutoLyrics(on: Boolean) { autoLyrics = on; prefs.edit().putBoolean("auto_lyrics", on).apply() }
+    fun changeAnimatedCovers(on: Boolean) { animatedCovers = on; prefs.edit().putBoolean("animated_covers", on).apply() }
+    fun changeAiKey(key: String) { aiKey = key.trim(); prefs.edit().putString("ai_key", aiKey).apply() }
 
     /** Canciones que ya se buscaron en internet sin éxito (para no buscarlas cada vez). */
     fun lyricsNotFound(songId: Long) = prefs.getStringSet("lyrics_not_found", emptySet())!!.contains(songId.toString())

@@ -50,7 +50,7 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
     var showKey by remember { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = { store.setAiKey(key); onDismiss() },
+        onDismissRequest = { store.changeAiKey(key); onDismiss() },
         title = { Text("Ajustes") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -58,12 +58,12 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
                     "Buscar letras automáticamente",
                     "Al poner una canción sin letra, Opsound la busca sola en internet (LRCLIB).",
                     store.autoLyrics,
-                ) { store.setAutoLyrics(it) }
+                ) { store.changeAutoLyrics(it) }
                 SettingSwitch(
                     "Portadas animadas",
                     "Zoom lento, destello y partículas en la portada, como en Apple Music.",
                     store.animatedCovers,
-                ) { store.setAnimatedCovers(it) }
+                ) { store.changeAnimatedCovers(it) }
 
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.White.copy(alpha = 0.08f))
 
@@ -112,7 +112,7 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { store.setAiKey(key); onDismiss() }) { Text("Guardar", color = Accent) }
+            TextButton(onClick = { store.changeAiKey(key); onDismiss() }) { Text("Guardar", color = Accent) }
         },
     )
 }
