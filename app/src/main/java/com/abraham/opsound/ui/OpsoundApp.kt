@@ -453,14 +453,19 @@ private fun PlayerApp() {
 
     fun generateLyrics() {
         val song = currentSong ?: return
-        if (store.aiKey.isBlank()) {
+        if (store.activeAiKey.isBlank()) {
             lyricsStatus = LyricsStatus.Failed("Primero pon tu clave gratis de IA en Ajustes.")
             showSettings = true
             return
         }
         scope.launch {
             lyricsStatus = LyricsStatus.Generating
-            val result = withContext(Dispatchers.IO) { runCatching { OnlineLyrics.transcribeWithAi(context, song, store.aiKey) } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (store.aiProvider == "groq") OnlineLyrics.transcribeWithAi(context, song, store.aiKey)
+                    else OnlineLyrics.transcribeWithDeepgram(context, song, store.deepgramKey)
+                }
+            }
             result.onSuccess { lrc ->
                 LyricsStore.saveText(context, song.id, lrc)
                 lyricsStatus = LyricsStatus.Idle
@@ -617,7 +622,7 @@ private fun PlayerApp() {
                     onPasteLyrics = { pastingLyricsFor = ui.song },
                     onRemoveLyrics = { ui.song?.let { LyricsStore.remove(it.id) } },
                     lyricsStatus = lyricsStatus,
-                    hasAiKey = store.aiKey.isNotBlank(),
+                    hasAiKey = store.activeAiKey.isNotBlank(),
                     animatedCover = store.animatedCovers,
                     videoCover = ui.song?.let { s -> CustomCovers.version.let { CustomCovers.videoFile(s.id) } },
                     onSearchLyrics = ::searchLyrics,

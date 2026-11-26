@@ -147,6 +147,87 @@ object OnlineLyrics {
         }
     }
 
+    /**
+     * Deepgram: escucha la canción y regresa cada palabra con su tiempo; las pausas separan las líneas.
+     */
+    fun transcribeWithDeepgram(context: Context, song: Song, apiKey: String): String {
+        if (apiKey.isBlank()) throw AiException("Falta tu clave de Deepgram. Ponla en Ajustes.")
+        val bytes = context.contentResolver.openInputStream(song.uri)?.use { it.readBytes() }
+            ?: throw AiException("No se pudo leer la canción")
+        val type = context.contentResolver.getType(song.uri) ?: "audio/mpeg"
+
+        fun request(model: String): Pair<Int, String> {
+            val url = "https://api.deepgram.com/v1/listen?model=$model&language=es&smart_format=true&punctuate=true&utterances=true&utt_split=0.7"
+            val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                doOutput = true
+                connectTimeout = 20_000
+                readTimeout = 180_000
+                setRequestProperty("Authorization", "Token ${apiKey.trim()}")
+                setRequestProperty("Content-Type", type)
+                setFixedLengthStreamingMode(bytes.size)
+            }
+            return try {
+                conn.outputStream.use { it.write(bytes) }
+                val code = conn.responseCode
+                code to ((if (code == 200) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty())
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+        // Modelo más nuevo primero; si no acepta español en tu cuenta, usamos el anterior.
+        var (code, body) = request("nova-3")
+        if (code == 400) {
+            val retry = request("nova-2")
+            code = retry.first; body = retry.second
+        }
+        if (code != 200) {
+            throw AiException(
+                when (code) {
+                    401, 403 -> "La clave de Deepgram no es válida. Revísala en Ajustes."
+                    402 -> "Se acabaron los créditos gratis de Deepgram."
+                    413 -> "La canción es muy pesada."
+                    429 -> "Demasiadas solicitudes. Intenta en un rato."
+                    else -> "Deepgram respondió con error $code. ${body.take(120)}"
+                }
+            )
+        }
+        val results = JSONObject(body).getJSONObject("results")
+        val sb = StringBuilder()
+        fun addLine(words: List<Pair<Double, String>>) {
+            words.chunked(8).forEach { chunk ->
+                sb.append('[').append(LyricsStore.stamp((chunk.first().first * 1000).toLong())).append(']')
+                chunk.forEach { (t, text) -> sb.append(" <").append(LyricsStore.stamp((t * 1000).toLong())).append('>').append(text) }
+                sb.append('\n')
+            }
+        }
+        fun wordsOf(arr: JSONArray?): List<Pair<Double, String>> =
+            if (arr == null) emptyList() else (0 until arr.length()).map {
+                val w = arr.getJSONObject(it)
+                w.optDouble("start") to w.optString("punctuated_word", w.optString("word")).trim()
+            }.filter { it.second.isNotEmpty() }
+
+        val utterances = results.optJSONArray("utterances")
+        if (utterances != null && utterances.length() > 0) {
+            for (i in 0 until utterances.length()) addLine(wordsOf(utterances.getJSONObject(i).optJSONArray("words")))
+        } else {
+            // Sin frases: partimos en líneas cuando hay una pausa larga o termina una oración.
+            val words = wordsOf(
+                results.optJSONArray("channels")?.optJSONObject(0)?.optJSONArray("alternatives")?.optJSONObject(0)?.optJSONArray("words")
+            )
+            val line = mutableListOf<Pair<Double, String>>()
+            words.forEachIndexed { i, w ->
+                line += w
+                val next = words.getOrNull(i + 1)
+                if (next == null || next.first - w.first > 1.2 || w.second.endsWith(".") || w.second.endsWith("?") || w.second.endsWith("!")) {
+                    addLine(line.toList()); line.clear()
+                }
+            }
+        }
+        return sb.toString().ifBlank { throw AiException("La IA no encontró voz en esta canción") }
+    }
+
     /** Junta las palabras de la IA en líneas (por frase) con tiempos por palabra. */
     private fun buildLrc(json: JSONObject): String {
         val words = json.optJSONArray("words")

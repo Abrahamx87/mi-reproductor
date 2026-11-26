@@ -3,6 +3,10 @@ package com.abraham.opsound.ui
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,10 +51,17 @@ import com.abraham.opsound.update.Updater
 fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var key by remember { mutableStateOf(store.aiKey) }
+    var dgKey by remember { mutableStateOf(store.deepgramKey) }
+    var provider by remember { mutableStateOf(store.aiProvider) }
+    fun save() {
+        store.changeAiKey(key)
+        store.changeDeepgramKey(dgKey)
+        store.changeAiProvider(provider)
+    }
     var showKey by remember { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = { store.changeAiKey(key); onDismiss() },
+        onDismissRequest = { save(); onDismiss() },
         title = { Text("Ajustes") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
@@ -70,26 +81,33 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
                 Text("Letras con IA ✨", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Para tus canciones propias: la IA (Whisper) escucha la canción y escribe la letra sincronizada palabra por palabra. Necesita una clave gratis de Groq.",
+                    "Para tus canciones propias: la IA escucha la canción y escribe la letra sincronizada palabra por palabra. Elige quién lo hace y pon su clave gratis.",
                     color = Color.White.copy(alpha = 0.65f),
                     fontSize = 13.sp,
                 )
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ProviderChip("Deepgram (recomendado)", provider == "deepgram") { provider = "deepgram"; showKey = false }
+                    ProviderChip("Groq", provider == "groq") { provider = "groq"; showKey = false }
+                }
+                val isDeepgram = provider == "deepgram"
                 Text(
-                    "Consigue tu clave gratis aquí →",
+                    if (isDeepgram) "Consigue tu clave gratis (te regalan $200 de crédito) →" else "Consigue tu clave gratis de Groq →",
                     color = Accent,
                     fontSize = 14.sp,
                     textDecoration = TextDecoration.Underline,
                     modifier = Modifier
                         .padding(vertical = 8.dp)
                         .clickable {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.groq.com/keys")))
+                            val url = if (isDeepgram) "https://console.deepgram.com/signup" else "https://console.groq.com/keys"
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         },
                 )
                 OutlinedTextField(
-                    value = key,
-                    onValueChange = { key = it.trim() },
+                    value = if (isDeepgram) dgKey else key,
+                    onValueChange = { if (isDeepgram) dgKey = it.trim() else key = it.trim() },
                     singleLine = true,
-                    label = { Text("Clave de Groq (gsk_…)") },
+                    label = { Text(if (isDeepgram) "Clave de Deepgram" else "Clave de Groq (gsk_…)") },
                     visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
                     trailingIcon = {
                         IconButton(onClick = { showKey = !showKey }) {
@@ -112,7 +130,7 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            TextButton(onClick = { store.changeAiKey(key); onDismiss() }) { Text("Guardar", color = Accent) }
+            TextButton(onClick = { save(); onDismiss() }) { Text("Guardar", color = Accent) }
         },
     )
 }
@@ -134,4 +152,19 @@ private fun SettingSwitch(title: String, subtitle: String, checked: Boolean, onC
             colors = SwitchDefaults.colors(checkedTrackColor = Accent, checkedThumbColor = Color.White),
         )
     }
+}
+
+@Composable
+private fun ProviderChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    Text(
+        label,
+        color = if (selected) Color.Black else Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(CircleShape)
+            .background(if (selected) Accent else Color.White.copy(alpha = 0.1f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    )
 }

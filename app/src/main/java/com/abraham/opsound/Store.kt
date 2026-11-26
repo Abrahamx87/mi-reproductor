@@ -52,6 +52,17 @@ class OpsoundStore(context: Context) {
         private set
     var aiKey by mutableStateOf(prefs.getString("ai_key", "").orEmpty())
         private set
+    var deepgramKey by mutableStateOf(prefs.getString("deepgram_key", "").orEmpty())
+        private set
+    /** "deepgram" o "groq": quién genera las letras con IA. */
+    var aiProvider by mutableStateOf(prefs.getString("ai_provider", "deepgram").orEmpty())
+        private set
+
+    fun changeDeepgramKey(key: String) { deepgramKey = key.trim(); prefs.edit().putString("deepgram_key", deepgramKey).apply() }
+    fun changeAiProvider(p: String) { aiProvider = p; prefs.edit().putString("ai_provider", p).apply() }
+
+    /** Clave del proveedor elegido. */
+    val activeAiKey: String get() = if (aiProvider == "groq") aiKey else deepgramKey
 
     fun changeAutoLyrics(on: Boolean) { autoLyrics = on; prefs.edit().putBoolean("auto_lyrics", on).apply() }
     fun changeAnimatedCovers(on: Boolean) { animatedCovers = on; prefs.edit().putBoolean("animated_covers", on).apply() }
