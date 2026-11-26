@@ -72,11 +72,23 @@ object LyricsCard {
         val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(0f, 0f, 0f, h.toFloat(), bgTop, bgBottom, Shader.TileMode.CLAMP) }
         c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), bg)
         if (style == CardStyle.COVER && soft != null) {
-            val tiny = Bitmap.createScaledBitmap(soft, 24, 24, true)
-            val blurred = Bitmap.createScaledBitmap(tiny, w, w, true)
-            val p = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 120 }
-            c.drawBitmap(blurred, 0f, (h - w) / 2f, p)
-            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), Paint().apply { color = ColorUtils.setAlphaComponent(Color.BLACK, 70) })
+            // Portada muy difuminada que cubre TODA la historia (sin franjas ni cortes).
+            val side = minOf(soft.width, soft.height)
+            val square = Bitmap.createBitmap(soft, (soft.width - side) / 2, (soft.height - side) / 2, side, side)
+            var blurred = Bitmap.createScaledBitmap(square, 20, 20, true)
+            // Varias pasadas de agrandado suave: el difuminado queda liso, sin cuadritos.
+            for (size in listOf(60, 180, 540)) blurred = Bitmap.createScaledBitmap(blurred, size, size, true)
+            val cover = RectF((w - h) / 2f, 0f, (w + h) / 2f, h.toFloat()) // cuadro del alto de la historia, centrado
+            c.drawBitmap(blurred, null, cover, Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+            // Velo oscuro suave para que la letra se lea bien.
+            c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), Paint().apply {
+                shader = LinearGradient(
+                    0f, 0f, 0f, h.toFloat(),
+                    intArrayOf(ColorUtils.setAlphaComponent(Color.BLACK, 60), ColorUtils.setAlphaComponent(Color.BLACK, 90), ColorUtils.setAlphaComponent(Color.BLACK, 150)),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP,
+                )
+            })
         }
 
         val bold = ResourcesCompat.getFont(context, R.font.montserrat_bold) ?: Typeface.DEFAULT_BOLD

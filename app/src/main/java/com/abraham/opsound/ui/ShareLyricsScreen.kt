@@ -55,8 +55,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import com.abraham.opsound.CardStyle
 import com.abraham.opsound.LyricsCard
 import kotlinx.coroutines.Dispatchers
@@ -92,13 +93,20 @@ fun ShareLyricsScreen(
         }
     }
 
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    // Pantalla encima del reproductor (no ventana aparte): así respeta la barra de botones de Android.
+    BackHandler(onBack = onDismiss)
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF070B0F))
+            .pointerInput(Unit) { detectTapGestures { } } // que los toques no pasen al reproductor
+    ) {
         Column(
             Modifier
                 .fillMaxSize()
-                .background(Color(0xFF070B0F))
                 .statusBarsPadding()
                 .navigationBarsPadding()
+                .padding(bottom = 8.dp)
         ) {
             // Encabezado
             Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -196,7 +204,10 @@ fun ShareLyricsScreen(
 
             // Botones para compartir
             Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 10.dp, bottom = 6.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
             ) {
                 val ready = preview != null && chosen.isNotEmpty()
