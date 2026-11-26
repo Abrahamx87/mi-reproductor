@@ -366,7 +366,7 @@ private fun EmptyLyrics(
                     if (hasAiKey) "La IA escucha la canción y la sincroniza palabra por palabra" else "Primero pon tu clave gratis en Ajustes",
                     onGenerateAi,
                 )
-                LyricsAction(Icons.Rounded.FileOpen, "Cargar archivo .lrc", "Si ya tienes la letra sincronizada", onLoadFile)
+                LyricsAction(Icons.Rounded.FileOpen, "Importar archivo .lrc", "Si ya tienes la letra sincronizada (o la de otra versión)", onLoadFile)
                 LyricsAction(Icons.Rounded.ContentPaste, "Pegar letra + sincronizar", "Lo más exacto: pega la letra real y luego la IA pone los tiempos", onPaste)
             }
         }

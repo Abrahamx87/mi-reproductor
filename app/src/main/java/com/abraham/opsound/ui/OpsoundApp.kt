@@ -489,6 +489,36 @@ private fun PlayerApp() {
         }
     }
     var pastingLyricsFor by remember { mutableStateOf<Song?>(null) }
+    var exportingLyrics by remember { mutableStateOf(false) }
+    var copyingLyrics by remember { mutableStateOf(false) }
+
+    fun lrcFileName(song: Song) =
+        "${song.artist} - ${song.title}".replace(Regex("[\\\\/:*?\"<>|]"), "_").take(80) + ".lrc"
+
+    fun exportToDownloads(song: Song, lrc: String) {
+        val ok = runCatching {
+            val values = android.content.ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, lrcFileName(song))
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/Opsound")
+            }
+            val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)!!
+            context.contentResolver.openOutputStream(uri)!!.use { it.write(lrc.toByteArray()) }
+        }.isSuccess
+        Toast.makeText(context, if (ok) "Guardada en Descargas › Opsound" else "No se pudo guardar", Toast.LENGTH_SHORT).show()
+    }
+
+    fun shareLrc(song: Song, lrc: String) {
+        val dir = java.io.File(context.cacheDir, "share").apply { mkdirs() }
+        val file = java.io.File(dir, lrcFileName(song)).apply { writeText(lrc) }
+        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Compartir letra (.lrc)"))
+    }
     var lyricsFileFor by remember { mutableStateOf<Song?>(null) }
     val lyricsPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val song = lyricsFileFor
@@ -634,7 +664,14 @@ private fun PlayerApp() {
                     onRemoveLyrics = { ui.song?.let { LyricsStore.remove(it.id) } },
                     lyricsStatus = lyricsStatus,
                     hasAiKey = store.activeAiKey.isNotBlank(),
-                    animatedCover = store.animatedCovers,
+                    coverAnimation = store.coverAnimation,
+                    onChangeCoverAnimation = { store.changeCoverAnimation(it) },
+                    onSaveLyrics = { edited ->
+                        ui.song?.let { LyricsStore.saveText(context, it.id, edited.toLrc()) }
+                        Toast.makeText(context, "Letra guardada ✏️", Toast.LENGTH_SHORT).show()
+                    },
+                    onExportLyrics = { exportingLyrics = true },
+                    onCopyLyricsFrom = { copyingLyrics = true },
                     videoCover = ui.song?.let { s -> CustomCovers.version.let { CustomCovers.videoFile(s.id) } },
                     onSearchLyrics = ::searchLyrics,
                     onGenerateLyrics = ::generateLyrics,
@@ -702,6 +739,39 @@ private fun PlayerApp() {
             onDismiss = { editing = null },
         )
     }
+    if (exportingLyrics) {
+        val song = ui.song
+        val lrc = lyrics?.toLrc()
+        if (song == null || lrc == null) {
+            exportingLyrics = false
+        } else {
+            ExportLyricsDialog(
+                onSaveDownloads = { exportToDownloads(song, lrc); exportingLyrics = false },
+                onShare = { shareLrc(song, lrc); exportingLyrics = false },
+                onDismiss = { exportingLyrics = false },
+            )
+        }
+    }
+    if (copyingLyrics) {
+        val current = ui.song
+        val withLyrics = remember(songs) {
+            val ids = LyricsStore.savedIds(context)
+            songs.orEmpty().filter { it.id in ids && it.id != current?.id }
+        }
+        CopyLyricsDialog(
+            songs = withLyrics,
+            onPick = { from ->
+                val text = LyricsStore.readSaved(from.id)
+                if (current != null && text != null) {
+                    LyricsStore.saveText(context, current.id, text)
+                    Toast.makeText(context, "Letra copiada. Si quedó desfasada: ⋮ › Letra: editar › Mover toda la letra", Toast.LENGTH_LONG).show()
+                }
+                copyingLyrics = false
+            },
+            onDismiss = { copyingLyrics = false },
+        )
+    }
+
     pastingLyricsFor?.let { song ->
         PasteLyricsDialog(
             onSave = { text ->

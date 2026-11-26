@@ -50,6 +50,12 @@ class OpsoundStore(context: Context) {
         private set
     var animatedCovers by mutableStateOf(prefs.getBoolean("animated_covers", true))
         private set
+    /** Animación de la portada: nombre de [com.abraham.opsound.ui.CoverAnimation]. */
+    var coverAnimation by mutableStateOf(
+        prefs.getString("cover_animation", null) ?: if (prefs.getBoolean("animated_covers", true)) "LIVING" else "NONE"
+    )
+        private set
+    fun changeCoverAnimation(name: String) { coverAnimation = name; prefs.edit().putString("cover_animation", name).apply() }
     var aiKey by mutableStateOf(prefs.getString("ai_key", "").orEmpty())
         private set
     var deepgramKey by mutableStateOf(prefs.getString("deepgram_key", "").orEmpty())

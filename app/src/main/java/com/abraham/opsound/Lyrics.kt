@@ -17,6 +17,17 @@ data class LyricLine(val timeMs: Long?, val text: String, val words: List<LyricW
 
 data class Lyrics(val lines: List<LyricLine>) {
     val synced: Boolean get() = lines.any { it.timeMs != null }
+
+    /** Convierte la letra a texto LRC (con tiempos por palabra si los tiene). */
+    fun toLrc(): String =
+        if (!synced) lines.joinToString("\n") { it.text }
+        else lines.filter { it.timeMs != null }.joinToString("\n") { l ->
+            buildString {
+                append('[').append(LyricsStore.stamp(l.timeMs!!)).append(']')
+                if (l.words.isNotEmpty()) l.words.forEach { w -> append(" <").append(LyricsStore.stamp(w.timeMs)).append('>').append(w.text) }
+                else append(' ').append(l.text)
+            }
+        }
 }
 
 object LyricsStore {
@@ -33,6 +44,14 @@ object LyricsStore {
     private fun file(songId: Long) = dir?.let { File(it, "$songId.lrc") }
 
     fun hasSaved(songId: Long) = file(songId)?.exists() == true
+
+    /** Canciones que ya tienen letra guardada (para copiarla a otra versión de la canción). */
+    fun savedIds(context: Context): Set<Long> {
+        init(context)
+        return dir?.listFiles()?.mapNotNull { it.name.removeSuffix(".lrc").toLongOrNull() }?.toSet().orEmpty()
+    }
+
+    fun readSaved(songId: Long): String? = file(songId)?.takeIf { it.exists() }?.readText()
 
     /** Busca la letra: primero la que tú guardaste, luego la que viene dentro del archivo. (Fuera del hilo principal.) */
     fun load(context: Context, song: Song): Lyrics? {

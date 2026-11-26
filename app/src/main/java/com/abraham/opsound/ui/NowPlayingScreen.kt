@@ -126,7 +126,11 @@ fun NowPlayingScreen(
     lyricsStatus: LyricsStatus,
     hasSavedLyrics: Boolean,
     hasAiKey: Boolean,
-    animatedCover: Boolean,
+    coverAnimation: String,
+    onChangeCoverAnimation: (String) -> Unit,
+    onSaveLyrics: (Lyrics) -> Unit,
+    onExportLyrics: () -> Unit,
+    onCopyLyricsFrom: () -> Unit,
     videoCover: File?,
     onLoadLyricsFile: () -> Unit,
     onPasteLyrics: () -> Unit,
@@ -147,6 +151,8 @@ fun NowPlayingScreen(
     LaunchedEffect(showLyrics) { if (!showLyrics) controlsVisible = true }
     // Compartir letra: índice de la línea con la que se abrió (-1 = cerrado).
     var shareFrom by remember { mutableStateOf<Int?>(null) }
+    var choosingAnimation by remember { mutableStateOf(false) }
+    var editingLyrics by remember { mutableStateOf(false) }
     val song = playback.song
     val cover = rememberArtwork(song, 1024)
     val background = rememberBlurredBackground(song, cover)
@@ -176,13 +182,19 @@ fun NowPlayingScreen(
                     DropdownMenuItem(text = { Text("Ver fila de reproducción") }, onClick = { menuOpen = false; onOpenQueue() })
                     DropdownMenuItem(text = { Text("Agregar a playlist") }, onClick = { menuOpen = false; onAddToPlaylist() })
                     DropdownMenuItem(text = { Text("Cambiar portada") }, onClick = { menuOpen = false; onChangeCover() })
+                    DropdownMenuItem(text = { Text("Animación de portada") }, onClick = { menuOpen = false; choosingAnimation = true })
                     DropdownMenuItem(text = { Text("Editar información") }, onClick = { menuOpen = false; onEditInfo() })
                     DropdownMenuItem(text = { Text("Letra: buscar en internet") }, onClick = { menuOpen = false; showLyrics = true; onSearchLyrics() })
                     DropdownMenuItem(
                         text = { Text(if (lyrics != null && !lyrics.synced) "Letra: sincronizar con IA ✨" else "Letra: generar con IA ✨") },
                         onClick = { menuOpen = false; showLyrics = true; onGenerateLyrics() },
                     )
-                    DropdownMenuItem(text = { Text("Letra: cargar archivo .lrc") }, onClick = { menuOpen = false; onLoadLyricsFile() })
+                    if (lyrics != null) {
+                        DropdownMenuItem(text = { Text("Letra: editar ✏️") }, onClick = { menuOpen = false; editingLyrics = true })
+                        DropdownMenuItem(text = { Text("Letra: exportar (.lrc)") }, onClick = { menuOpen = false; onExportLyrics() })
+                    }
+                    DropdownMenuItem(text = { Text("Letra: copiar de otra canción") }, onClick = { menuOpen = false; onCopyLyricsFrom() })
+                    DropdownMenuItem(text = { Text("Letra: importar archivo .lrc") }, onClick = { menuOpen = false; onLoadLyricsFile() })
                     DropdownMenuItem(text = { Text("Letra: pegar texto") }, onClick = { menuOpen = false; onPasteLyrics() })
                     if (hasSavedLyrics) {
                         DropdownMenuItem(text = { Text("Quitar letra guardada") }, onClick = { menuOpen = false; onRemoveLyrics() })
@@ -313,7 +325,7 @@ fun NowPlayingScreen(
                 CoverArt(
                     cover = cover,
                     videoFile = videoCover,
-                    animated = animatedCover,
+                    style = CoverAnimation.resolve(CoverAnimation.from(coverAnimation), song?.id ?: 0L),
                     isPlaying = playback.isPlaying,
                     modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                     onTap = onPlayPause,
@@ -403,6 +415,23 @@ fun NowPlayingScreen(
                 }
             }
         }
+        if (editingLyrics && lyrics != null) {
+            LyricsEditor(
+                lyrics = lyrics,
+                smooth = smooth,
+                isPlaying = playback.isPlaying,
+                onPlayPause = onPlayPause,
+                onSave = { onSaveLyrics(it); editingLyrics = false },
+                onCancel = { editingLyrics = false },
+            )
+        }
+        if (choosingAnimation) {
+            CoverAnimationDialog(
+                current = coverAnimation,
+                onPick = { onChangeCoverAnimation(it) },
+                onDismiss = { choosingAnimation = false },
+            )
+        }
         shareFrom?.let { start ->
             val shareLines = lyrics?.lines.orEmpty().filter { it.text.isNotBlank() }.map { it.text }
             ShareLyricsScreen(
@@ -466,7 +495,7 @@ private fun BlurredCoverBackground(cover: ImageBitmap?, modifier: Modifier = Mod
 private fun CoverArt(
     cover: ImageBitmap?,
     videoFile: File?,
-    animated: Boolean,
+    style: CoverAnimation,
     isPlaying: Boolean,
     modifier: Modifier = Modifier,
     onTap: () -> Unit,
@@ -514,12 +543,12 @@ private fun CoverArt(
                 }
             }
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.White.copy(alpha = 0.08f)),
+            .background(if (cover == null) Color.White.copy(alpha = 0.08f) else Color.Transparent),
         contentAlignment = Alignment.Center,
     ) {
         when {
             videoFile != null -> VideoCover(videoFile, playing = isPlaying, modifier = Modifier.fillMaxSize())
-            cover != null -> LivingCover(cover, animated = animated, modifier = Modifier.fillMaxSize())
+            cover != null -> LivingCover(cover, style = style, isPlaying = isPlaying, modifier = Modifier.fillMaxSize())
             else -> Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.5f), modifier = Modifier.size(96.dp))
         }
     }

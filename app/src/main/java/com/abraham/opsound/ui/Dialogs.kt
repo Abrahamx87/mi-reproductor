@@ -24,6 +24,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.AddToQueue
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -370,5 +372,101 @@ fun CoverChooserDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Accent) } },
+    )
+}
+
+/** Elegir la animación de la portada. */
+@Composable
+fun CoverAnimationDialog(current: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Animación de portada") },
+        text = {
+            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
+                CoverAnimation.entries.forEach { a ->
+                    val sel = a.name == current
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (sel) Accent.copy(alpha = 0.18f) else Color.Transparent)
+                            .clickable { onPick(a.name) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Text(a.label, color = if (sel) Accent else Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Text(a.description, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Listo", color = Accent) } },
+    )
+}
+
+/** Elegir de qué canción copiar la letra (con sus tiempos). */
+@Composable
+fun CopyLyricsDialog(songs: List<com.abraham.opsound.Song>, onPick: (com.abraham.opsound.Song) -> Unit, onDismiss: () -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val shown = remember(songs, query) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) songs else songs.filter { it.title.lowercase().contains(q) || it.artist.lowercase().contains(q) }
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Copiar letra de…") },
+        text = {
+            Column {
+                Text(
+                    "Elige la canción que ya tiene la letra (por ejemplo, la versión original). Se copian la letra y sus tiempos.",
+                    fontSize = 13.sp, color = Color.White.copy(alpha = 0.65f),
+                )
+                Spacer(Modifier.size(8.dp))
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    placeholder = { Text("Buscar…") },
+                    colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, cursorColor = Accent),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.size(6.dp))
+                if (songs.isEmpty()) {
+                    Text("Aún ninguna canción tiene letra guardada.", color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp)
+                }
+                Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+                    shown.forEach { song ->
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { onPick(song) }
+                                .padding(horizontal = 8.dp, vertical = 10.dp),
+                        ) {
+                            Text(song.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(song.artist, color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Accent) } },
+    )
+}
+
+/** Exportar la letra como archivo .lrc. */
+@Composable
+fun ExportLyricsDialog(onSaveDownloads: () -> Unit, onShare: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Exportar letra (.lrc)") },
+        text = {
+            Column {
+                Text("El archivo .lrc guarda la letra con sus tiempos. Puedes importarlo en otra canción o en otra app.", fontSize = 13.sp, color = Color.White.copy(alpha = 0.65f))
+                Spacer(Modifier.size(8.dp))
+                IconOption(Icons.Rounded.Download, "Guardar en Descargas") { onSaveDownloads() }
+                IconOption(Icons.Rounded.Share, "Compartir archivo") { onShare() }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Cerrar", color = Accent) } },
     )
 }

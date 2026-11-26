@@ -53,6 +53,14 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
     var key by remember { mutableStateOf(store.aiKey) }
     var dgKey by remember { mutableStateOf(store.deepgramKey) }
     var provider by remember { mutableStateOf(store.aiProvider) }
+    var choosingAnimation by remember { mutableStateOf(false) }
+    if (choosingAnimation) {
+        CoverAnimationDialog(
+            current = store.coverAnimation,
+            onPick = { store.changeCoverAnimation(it) },
+            onDismiss = { choosingAnimation = false },
+        )
+    }
     fun save() {
         store.changeAiKey(key)
         store.changeDeepgramKey(dgKey)
@@ -72,9 +80,18 @@ fun SettingsDialog(store: OpsoundStore, onDismiss: () -> Unit) {
                 ) { store.changeAutoLyrics(it) }
                 SettingSwitch(
                     "Portadas animadas",
-                    "Zoom lento, destello y partículas en la portada, como en Apple Music.",
-                    store.animatedCovers,
-                ) { store.changeAnimatedCovers(it) }
+                    "Activa o quita la animación de las portadas.",
+                    store.coverAnimation != "NONE",
+                ) { on -> store.changeCoverAnimation(if (on) "LIVING" else "NONE") }
+                if (store.coverAnimation != "NONE") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { choosingAnimation = true }.padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("Estilo de animación", color = Color.White, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                        Text(CoverAnimation.from(store.coverAnimation).label + "  ›", color = Accent, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
 
                 HorizontalDivider(Modifier.padding(vertical = 12.dp), color = Color.White.copy(alpha = 0.08f))
 

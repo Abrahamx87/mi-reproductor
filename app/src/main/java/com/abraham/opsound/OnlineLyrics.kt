@@ -8,6 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import kotlin.math.abs
+import kotlin.concurrent.thread
 
 /**
  * Letras desde internet:
@@ -147,8 +148,12 @@ object OnlineLyrics {
         }
     }
 
+    /** Una palabra escuchada por la IA (en segundos). */
+    private data class Heard(val start: Double, val end: Double, val text: String)
+
     /**
-     * Deepgram: escucha la canción y regresa cada palabra con su tiempo; las pausas separan las líneas.
+     * Deepgram con DOS modelos que se completan: Whisper (mejor para canto) y Nova.
+     * Donde uno no escuchó nada, se rellena con lo que oyó el otro, para cubrir toda la canción.
      */
     fun transcribeWithDeepgram(context: Context, song: Song, apiKey: String): String {
         if (apiKey.isBlank()) throw AiException("Falta tu clave de Deepgram. Ponla en Ajustes.")
@@ -157,12 +162,12 @@ object OnlineLyrics {
         val type = context.contentResolver.getType(song.uri) ?: "audio/mpeg"
 
         fun request(model: String): Pair<Int, String> {
-            val url = "https://api.deepgram.com/v1/listen?model=$model&language=es&smart_format=true&punctuate=true&utterances=true&utt_split=0.7"
+            val url = "https://api.deepgram.com/v1/listen?model=$model&language=es&smart_format=true&punctuate=true"
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 doOutput = true
                 connectTimeout = 20_000
-                readTimeout = 180_000
+                readTimeout = 300_000
                 setRequestProperty("Authorization", "Token ${apiKey.trim()}")
                 setRequestProperty("Content-Type", type)
                 setFixedLengthStreamingMode(bytes.size)
@@ -171,62 +176,82 @@ object OnlineLyrics {
                 conn.outputStream.use { it.write(bytes) }
                 val code = conn.responseCode
                 code to ((if (code == 200) conn.inputStream else conn.errorStream)?.bufferedReader()?.use { it.readText() }.orEmpty())
+            } catch (e: Exception) {
+                -1 to (e.message ?: "")
             } finally {
                 conn.disconnect()
             }
         }
 
-        // Whisper reconoce mucho mejor el canto con música; si falla, probamos con Nova.
-        var (code, body) = request("whisper-large")
-        for (fallback in listOf("nova-3", "nova-2")) {
-            if (code == 200 || code == 401 || code == 403 || code == 402) break
-            val retry = request(fallback)
-            code = retry.first; body = retry.second
+        fun words(body: String): List<Heard> = runCatching {
+            val arr = JSONObject(body).getJSONObject("results").getJSONArray("channels")
+                .getJSONObject(0).getJSONArray("alternatives").getJSONObject(0).getJSONArray("words")
+            (0 until arr.length()).map {
+                val w = arr.getJSONObject(it)
+                Heard(w.optDouble("start"), w.optDouble("end"), w.optString("punctuated_word", w.optString("word")).trim())
+            }.filter { it.text.isNotEmpty() }
+        }.getOrDefault(emptyList())
+
+        // Los dos modelos escuchan al mismo tiempo (así no tarda el doble).
+        var whisper: Pair<Int, String> = -1 to ""
+        var nova: Pair<Int, String> = -1 to ""
+        val t1 = thread { whisper = request("whisper-large") }
+        val t2 = thread {
+            nova = request("nova-3").let { if (it.first == 400) request("nova-2") else it }
         }
-        if (code != 200) {
+        t1.join(); t2.join()
+
+        val codes = listOf(whisper.first, nova.first)
+        if (codes.none { it == 200 }) {
+            val code = codes.firstOrNull { it > 0 } ?: -1
             throw AiException(
                 when (code) {
                     401, 403 -> "La clave de Deepgram no es válida. Revísala en Ajustes."
                     402 -> "Se acabaron los créditos gratis de Deepgram."
                     413 -> "La canción es muy pesada."
                     429 -> "Demasiadas solicitudes. Intenta en un rato."
-                    else -> "Deepgram respondió con error $code. ${body.take(120)}"
+                    -1 -> "No se pudo conectar con Deepgram. Revisa tu internet."
+                    else -> "Deepgram respondió con error $code."
                 }
             )
         }
-        val results = JSONObject(body).getJSONObject("results")
-        val sb = StringBuilder()
-        fun addLine(words: List<Pair<Double, String>>) {
-            words.chunked(8).forEach { chunk ->
-                sb.append('[').append(LyricsStore.stamp((chunk.first().first * 1000).toLong())).append(']')
-                chunk.forEach { (t, text) -> sb.append(" <").append(LyricsStore.stamp((t * 1000).toLong())).append('>').append(text) }
-                sb.append('\n')
-            }
-        }
-        fun wordsOf(arr: JSONArray?): List<Pair<Double, String>> =
-            if (arr == null) emptyList() else (0 until arr.length()).map {
-                val w = arr.getJSONObject(it)
-                w.optDouble("start") to w.optString("punctuated_word", w.optString("word")).trim()
-            }.filter { it.second.isNotEmpty() }
+        val a = if (whisper.first == 200) words(whisper.second) else emptyList()
+        val b = if (nova.first == 200) words(nova.second) else emptyList()
+        val merged = merge(a, b)
+        if (merged.isEmpty()) throw AiException("La IA no encontró voz en esta canción")
 
-        val utterances = results.optJSONArray("utterances")
-        if (utterances != null && utterances.length() > 0) {
-            for (i in 0 until utterances.length()) addLine(wordsOf(utterances.getJSONObject(i).optJSONArray("words")))
-        } else {
-            // Sin frases: partimos en líneas cuando hay una pausa larga o termina una oración.
-            val words = wordsOf(
-                results.optJSONArray("channels")?.optJSONObject(0)?.optJSONArray("alternatives")?.optJSONObject(0)?.optJSONArray("words")
-            )
-            val line = mutableListOf<Pair<Double, String>>()
-            words.forEachIndexed { i, w ->
-                line += w
-                val next = words.getOrNull(i + 1)
-                if (next == null || next.first - w.first > 1.2 || w.second.endsWith(".") || w.second.endsWith("?") || w.second.endsWith("!")) {
-                    addLine(line.toList()); line.clear()
-                }
-            }
+        // Partimos en renglones: en pausas, al terminar una oración o cada 8 palabras.
+        val sb = StringBuilder()
+        val line = mutableListOf<Heard>()
+        fun flush() {
+            if (line.isEmpty()) return
+            sb.append('[').append(LyricsStore.stamp((line.first().start * 1000).toLong())).append(']')
+            line.forEach { w -> sb.append(" <").append(LyricsStore.stamp((w.start * 1000).toLong())).append('>').append(w.text) }
+            sb.append('\n')
+            line.clear()
         }
-        return sb.toString().ifBlank { throw AiException("La IA no encontró voz en esta canción") }
+        merged.forEachIndexed { i, w ->
+            line += w
+            val next = merged.getOrNull(i + 1)
+            val pause = next != null && next.start - w.end > 0.8
+            val sentence = w.text.endsWith(".") || w.text.endsWith("?") || w.text.endsWith("!")
+            if (next == null || pause || sentence || line.size >= 8) flush()
+        }
+        return sb.toString()
+    }
+
+    /** Une lo que oyeron los dos modelos: base = el que oyó más; los huecos se rellenan con el otro. */
+    private fun merge(a: List<Heard>, b: List<Heard>): List<Heard> {
+        if (a.isEmpty()) return b
+        if (b.isEmpty()) return a
+        val (base, extra) = if (a.size >= b.size * 0.8) a to b else b to a
+        // Huecos de más de 3.5 s sin palabras en el modelo base (también al inicio y al final).
+        val gaps = mutableListOf<Pair<Double, Double>>()
+        gaps += 0.0 to base.first().start
+        base.zipWithNext().forEach { (x, y) -> if (y.start - x.end > 3.5) gaps += x.end to y.start }
+        gaps += base.last().end to Double.MAX_VALUE
+        val fill = extra.filter { w -> gaps.any { (s, e) -> w.start > s + 0.3 && w.end < e - 0.3 } }
+        return (base + fill).sortedBy { it.start }
     }
 
     /** Junta las palabras de la IA en líneas (por frase) con tiempos por palabra. */
