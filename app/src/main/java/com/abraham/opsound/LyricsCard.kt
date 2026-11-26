@@ -141,7 +141,7 @@ object LyricsCard {
 
         // Marca de Opsound.
         val brand = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { color = ColorUtils.setAlphaComponent(textColor, 170); typeface = bold; textSize = 34f }
-        c.drawText("♪ Opsound", left + pad, card.bottom - pad, brand)
+        c.drawText("♪ Abraham CT Music", left + pad, card.bottom - pad, brand)
         return out
     }
 
