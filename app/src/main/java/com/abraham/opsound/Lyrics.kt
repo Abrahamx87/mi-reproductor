@@ -9,8 +9,11 @@ import java.io.File
 import java.io.InputStream
 import java.nio.charset.Charset
 
+/** Una palabra con su momento exacto (cuando la letra viene sincronizada palabra por palabra). */
+data class LyricWord(val timeMs: Long, val text: String)
+
 /** Una línea de letra; timeMs = null si la letra no viene sincronizada. */
-data class LyricLine(val timeMs: Long?, val text: String)
+data class LyricLine(val timeMs: Long?, val text: String, val words: List<LyricWord> = emptyList())
 
 data class Lyrics(val lines: List<LyricLine>) {
     val synced: Boolean get() = lines.any { it.timeMs != null }
@@ -62,6 +65,18 @@ object LyricsStore {
 
     // ── Formato LRC: "[01:23.45] texto"
     private val tag = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
+    private val wordTag = Regex("""<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>([^<]*)""")
+
+    private fun toMs(min: String, sec: String, frac: String): Long {
+        val ms = when (frac.length) { 0 -> 0L; 1 -> frac.toLong() * 100; 2 -> frac.toLong() * 10; else -> frac.take(3).toLong() }
+        return min.toLong() * 60_000 + sec.toLong() * 1000 + ms
+    }
+
+    /** Convierte milisegundos a la etiqueta LRC "mm:ss.xx". */
+    fun stamp(ms: Long): String {
+        val t = ms.coerceAtLeast(0)
+        return "%02d:%02d.%02d".format(t / 60_000, (t / 1000) % 60, (t % 1000) / 10)
+    }
 
     fun parse(text: String): Lyrics {
         val lines = mutableListOf<LyricLine>()
@@ -71,13 +86,15 @@ object LyricsStore {
                 // Quitamos etiquetas de info como [ar:...] [ti:...]
                 if (!raw.trim().matches(Regex("""\[[a-zA-Z]+:.*]"""))) lines += LyricLine(null, raw.trim())
             } else {
-                val content = raw.substring(matches.last().range.last + 1).trim()
+                val rawContent = raw.substring(matches.last().range.last + 1).trim()
+                // LRC mejorado: "<00:12.30>palabra <00:12.80>otra" → tiempos por palabra.
+                val words = wordTag.findAll(rawContent).map { m ->
+                    LyricWord(toMs(m.groupValues[1], m.groupValues[2], m.groupValues[3]), m.groupValues[4].trim())
+                }.filter { it.text.isNotEmpty() }.toList()
+                val content = rawContent.replace(Regex("""<\d{1,2}:\d{2}(?:[.:]\d{1,3})?>"""), "").replace(Regex("\\s+"), " ").trim()
                 matches.forEach { m ->
-                    val min = m.groupValues[1].toLong()
-                    val sec = m.groupValues[2].toLong()
-                    val frac = m.groupValues[3]
-                    val ms = when (frac.length) { 0 -> 0L; 1 -> frac.toLong() * 100; 2 -> frac.toLong() * 10; else -> frac.take(3).toLong() }
-                    lines += LyricLine(min * 60_000 + sec * 1000 + ms, content)
+                    val start = toMs(m.groupValues[1], m.groupValues[2], m.groupValues[3])
+                    lines += LyricLine(start, content, words)
                 }
             }
         }

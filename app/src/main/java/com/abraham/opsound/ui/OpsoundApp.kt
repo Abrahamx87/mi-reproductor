@@ -78,6 +78,7 @@ import androidx.media3.common.Timeline
 import com.abraham.opsound.CustomCovers
 import com.abraham.opsound.Lyrics
 import com.abraham.opsound.LyricsStore
+import com.abraham.opsound.OnlineLyrics
 import com.abraham.opsound.SongEdit
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.CompositionLocalProvider
@@ -346,6 +347,17 @@ private fun PlayerApp() {
     fun pickCover(song: Song) {
         choosingCoverFor = song
     }
+    var videoFor by remember { mutableStateOf<Song?>(null) }
+    val videoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        val song = videoFor
+        videoFor = null
+        if (uri != null && song != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { runCatching { CustomCovers.setVideo(context, song.id, uri) }.isSuccess }
+                Toast.makeText(context, if (ok) "Portada en video lista 🎬" else "No se pudo usar ese video", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     fun pickFromGallery(song: Song) {
         coverFor = song
         coverPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -398,8 +410,67 @@ private fun PlayerApp() {
 
     // ── Letras: la que viene en el archivo o la que tú agregas
     val currentSong = ui.song
-    val lyrics by produceState<Lyrics?>(null, currentSong?.id, LyricsStore.version) {
-        value = currentSong?.let { song -> withContext(Dispatchers.IO) { runCatching { LyricsStore.load(context, song) }.getOrNull() } }
+    var lyrics by remember { mutableStateOf<Lyrics?>(null) }
+    var lyricsStatus by remember { mutableStateOf<LyricsStatus>(LyricsStatus.Idle) }
+    var showSettings by remember { mutableStateOf(false) }
+    LaunchedEffect(currentSong?.id, LyricsStore.version) {
+        val song = currentSong
+        if (song == null) { lyrics = null; return@LaunchedEffect }
+        val local = withContext(Dispatchers.IO) { runCatching { LyricsStore.load(context, song) }.getOrNull() }
+        lyrics = local
+        if (local != null) { lyricsStatus = LyricsStatus.Idle; return@LaunchedEffect }
+        if (lyricsStatus == LyricsStatus.Generating) return@LaunchedEffect
+        lyricsStatus = LyricsStatus.Idle
+        // Sin letra guardada: la buscamos sola en internet (una vez por canción).
+        if (store.autoLyrics && !store.lyricsNotFound(song.id)) {
+            lyricsStatus = LyricsStatus.Searching
+            val result = withContext(Dispatchers.IO) { runCatching { OnlineLyrics.searchLrclib(song) } }
+            val found = result.getOrNull()
+            when {
+                found != null -> LyricsStore.saveText(context, song.id, found) // recarga sola
+                result.isSuccess -> { store.markLyricsNotFound(song.id); lyricsStatus = LyricsStatus.Idle }
+                else -> lyricsStatus = LyricsStatus.Idle // sin internet: se intenta otro día
+            }
+        }
+    }
+
+    fun searchLyrics() {
+        val song = currentSong ?: return
+        scope.launch {
+            lyricsStatus = LyricsStatus.Searching
+            val result = withContext(Dispatchers.IO) { runCatching { OnlineLyrics.searchLrclib(song) } }
+            val found = result.getOrNull()
+            if (found != null) {
+                LyricsStore.saveText(context, song.id, found)
+                Toast.makeText(context, "Letra encontrada 🎤", Toast.LENGTH_SHORT).show()
+            } else {
+                lyricsStatus = LyricsStatus.Failed(
+                    if (result.isFailure) "No hay conexión a internet." else "No encontré esta letra en internet. Prueba con la IA ✨"
+                )
+            }
+        }
+    }
+
+    fun generateLyrics() {
+        val song = currentSong ?: return
+        if (store.aiKey.isBlank()) {
+            lyricsStatus = LyricsStatus.Failed("Primero pon tu clave gratis de IA en Ajustes.")
+            showSettings = true
+            return
+        }
+        scope.launch {
+            lyricsStatus = LyricsStatus.Generating
+            val result = withContext(Dispatchers.IO) { runCatching { OnlineLyrics.transcribeWithAi(context, song, store.aiKey) } }
+            result.onSuccess { lrc ->
+                LyricsStore.saveText(context, song.id, lrc)
+                lyricsStatus = LyricsStatus.Idle
+                Toast.makeText(context, "La IA generó la letra ✨", Toast.LENGTH_SHORT).show()
+            }.onFailure { e ->
+                lyricsStatus = LyricsStatus.Failed(
+                    (e as? OnlineLyrics.AiException)?.message ?: "No se pudo conectar con la IA. Revisa tu internet."
+                )
+            }
+        }
     }
     var pastingLyricsFor by remember { mutableStateOf<Song?>(null) }
     var lyricsFileFor by remember { mutableStateOf<Song?>(null) }
@@ -475,6 +546,7 @@ private fun PlayerApp() {
             onSongOptions = { song, playlistId -> optionsFor = song to playlistId },
             onNewPlaylist = { creatingPlaylist = true },
             onPlaylistOptions = { playlistOptions = it },
+            onOpenSettings = { showSettings = true },
             onBulk = { action, list ->
                 when (action) {
                     BulkAction.PLAY_NEXT -> enqueue(list, next = true)
@@ -544,6 +616,12 @@ private fun PlayerApp() {
                     onLoadLyricsFile = { ui.song?.let { pickLyricsFile(it) } },
                     onPasteLyrics = { pastingLyricsFor = ui.song },
                     onRemoveLyrics = { ui.song?.let { LyricsStore.remove(it.id) } },
+                    lyricsStatus = lyricsStatus,
+                    hasAiKey = store.aiKey.isNotBlank(),
+                    animatedCover = store.animatedCovers,
+                    videoCover = ui.song?.let { s -> CustomCovers.version.let { CustomCovers.videoFile(s.id) } },
+                    onSearchLyrics = ::searchLyrics,
+                    onGenerateLyrics = ::generateLyrics,
                     onPlayPause = ::playPause,
                     onPrevious = { player?.seekToPrevious() },
                     onNext = { player?.seekToNext() },
@@ -574,6 +652,10 @@ private fun PlayerApp() {
         }
     }
 
+    if (showSettings) {
+        SettingsDialog(store = store, onDismiss = { showSettings = false })
+    }
+
     choosingCoverFor?.let { song ->
         CoverChooserDialog(
             presets = CustomCovers.presets,
@@ -585,6 +667,11 @@ private fun PlayerApp() {
                 }
             },
             onGallery = { choosingCoverFor = null; pickFromGallery(song) },
+            onVideo = {
+                choosingCoverFor = null
+                videoFor = song
+                videoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+            },
             onDismiss = { choosingCoverFor = null },
         )
     }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -324,6 +325,7 @@ fun CoverChooserDialog(
     presets: List<String>,
     onPreset: (String) -> Unit,
     onGallery: () -> Unit,
+    onVideo: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -359,6 +361,12 @@ fun CoverChooserDialog(
                 }
                 HorizontalDivider(Modifier.padding(vertical = 16.dp), color = Color.White.copy(alpha = 0.08f))
                 IconOption(Icons.Rounded.PhotoLibrary, "Importar de galería") { onGallery() }
+                IconOption(Icons.Rounded.Movie, "Portada en video (animada)") { onVideo() }
+                Text(
+                    "Usa un video corto (5 a 15 s); se repite en bucle y sin sonido.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.55f),
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Accent) } },

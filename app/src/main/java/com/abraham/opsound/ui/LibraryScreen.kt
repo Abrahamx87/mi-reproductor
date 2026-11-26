@@ -51,6 +51,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -117,6 +118,7 @@ fun LibraryScreen(
     onNewPlaylist: () -> Unit,
     onPlaylistOptions: (playlistId: Long) -> Unit,
     onBulk: (action: BulkAction, songs: List<Song>) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(LibraryTab.SONGS) }
     var openKey by rememberSaveable { mutableStateOf<String?>(null) }
@@ -212,6 +214,9 @@ fun LibraryScreen(
                 Text("Opsound", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 IconButton(onClick = { searching = true }) {
                     Icon(Icons.Rounded.Search, contentDescription = "Buscar", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+                IconButton(onClick = onOpenSettings) {
+                    Icon(Icons.Rounded.Settings, contentDescription = "Ajustes", tint = Color.White, modifier = Modifier.size(26.dp))
                 }
             }
         }

@@ -26,7 +26,31 @@ object CustomCovers {
 
     fun file(songId: Long): File? = dir?.let { File(it, "$songId.jpg") }?.takeIf { it.exists() }
 
-    fun has(songId: Long) = file(songId) != null
+    fun has(songId: Long) = file(songId) != null || videoFile(songId) != null
+
+    /** Portada en video (se repite en bucle, sin sonido). */
+    fun videoFile(songId: Long): File? = dir?.let { File(it, "$songId.mp4") }?.takeIf { it.exists() }
+
+    /** Copia el video elegido y guarda un cuadro como imagen (para el fondo, colores y notificación). */
+    fun setVideo(context: Context, songId: Long, video: Uri) {
+        init(context)
+        val target = File(dir, "$songId.mp4")
+        context.contentResolver.openInputStream(video)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+            ?: error("No se pudo leer el video")
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(target.path)
+            val frame = retriever.getFrameAtTime(500_000) ?: retriever.frameAtTime
+            if (frame != null) {
+                val side = minOf(frame.width, frame.height)
+                val square = Bitmap.createBitmap(frame, (frame.width - side) / 2, (frame.height - side) / 2, side, side)
+                File(dir, "$songId.jpg").outputStream().use { square.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            }
+        } finally {
+            retriever.release()
+        }
+        version++
+    }
 
     /** Copia la imagen elegida, recortada en cuadrado y a buen tamaño. (Llamar fuera del hilo principal.) */
     fun set(context: Context, songId: Long, image: Uri) {
@@ -44,6 +68,7 @@ object CustomCovers {
         val square = Bitmap.createBitmap(bitmap, (bitmap.width - side) / 2, (bitmap.height - side) / 2, side, side)
         val target = File(dir, "$songId.jpg")
         target.outputStream().use { square.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        File(dir, "$songId.mp4").delete() // una imagen nueva reemplaza al video
         version++
     }
 
@@ -55,11 +80,13 @@ object CustomCovers {
         init(context)
         val target = File(dir, "$songId.jpg")
         context.assets.open(asset).use { input -> target.outputStream().use { input.copyTo(it) } }
+        File(dir, "$songId.mp4").delete()
         version++
     }
 
     fun remove(songId: Long) {
         file(songId)?.delete()
+        videoFile(songId)?.delete()
         version++
     }
 }

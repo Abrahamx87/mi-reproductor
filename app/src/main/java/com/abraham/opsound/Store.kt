@@ -45,6 +45,25 @@ class OpsoundStore(context: Context) {
     var edits by mutableStateOf(loadEdits())
         private set
 
+    // ── Ajustes
+    var autoLyrics by mutableStateOf(prefs.getBoolean("auto_lyrics", true))
+        private set
+    var animatedCovers by mutableStateOf(prefs.getBoolean("animated_covers", true))
+        private set
+    var aiKey by mutableStateOf(prefs.getString("ai_key", "").orEmpty())
+        private set
+
+    fun setAutoLyrics(on: Boolean) { autoLyrics = on; prefs.edit().putBoolean("auto_lyrics", on).apply() }
+    fun setAnimatedCovers(on: Boolean) { animatedCovers = on; prefs.edit().putBoolean("animated_covers", on).apply() }
+    fun setAiKey(key: String) { aiKey = key.trim(); prefs.edit().putString("ai_key", aiKey).apply() }
+
+    /** Canciones que ya se buscaron en internet sin éxito (para no buscarlas cada vez). */
+    fun lyricsNotFound(songId: Long) = prefs.getStringSet("lyrics_not_found", emptySet())!!.contains(songId.toString())
+    fun markLyricsNotFound(songId: Long) {
+        val set = prefs.getStringSet("lyrics_not_found", emptySet())!!.toMutableSet().apply { add(songId.toString()) }
+        prefs.edit().putStringSet("lyrics_not_found", set).apply()
+    }
+
     // ── Orden y "más escuchadas"
     fun changeSort(mode: SortMode) {
         sortMode = mode
