@@ -174,43 +174,16 @@ fun NowPlayingScreen(
 
         // Menú ⋮ (se usa en los dos modos).
         val menu: @Composable () -> Unit = {
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones", tint = Color.White)
-                }
-                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                    DropdownMenuItem(text = { Text("Ver fila de reproducción") }, onClick = { menuOpen = false; onOpenQueue() })
-                    DropdownMenuItem(text = { Text("Agregar a playlist") }, onClick = { menuOpen = false; onAddToPlaylist() })
-                    DropdownMenuItem(text = { Text("Cambiar portada") }, onClick = { menuOpen = false; onChangeCover() })
-                    DropdownMenuItem(text = { Text("Animación de portada") }, onClick = { menuOpen = false; choosingAnimation = true })
-                    DropdownMenuItem(text = { Text("Editar información") }, onClick = { menuOpen = false; onEditInfo() })
-                    DropdownMenuItem(text = { Text("Letra: buscar en internet") }, onClick = { menuOpen = false; showLyrics = true; onSearchLyrics() })
-                    DropdownMenuItem(
-                        text = { Text(if (lyrics != null && !lyrics.synced) "Letra: sincronizar con IA ✨" else "Letra: generar con IA ✨") },
-                        onClick = { menuOpen = false; showLyrics = true; onGenerateLyrics() },
-                    )
-                    if (lyrics != null) {
-                        DropdownMenuItem(text = { Text("Letra: editar ✏️") }, onClick = { menuOpen = false; editingLyrics = true })
-                        DropdownMenuItem(text = { Text("Letra: exportar (.lrc)") }, onClick = { menuOpen = false; onExportLyrics() })
-                    }
-                    DropdownMenuItem(text = { Text("Letra: copiar de otra canción") }, onClick = { menuOpen = false; onCopyLyricsFrom() })
-                    DropdownMenuItem(text = { Text("Letra: importar archivo .lrc") }, onClick = { menuOpen = false; onLoadLyricsFile() })
-                    DropdownMenuItem(text = { Text("Letra: pegar texto") }, onClick = { menuOpen = false; onPasteLyrics() })
-                    if (hasSavedLyrics) {
-                        DropdownMenuItem(text = { Text("Quitar letra guardada") }, onClick = { menuOpen = false; onRemoveLyrics() })
-                    }
-                    if (lyrics != null && lyrics.lines.any { it.text.isNotBlank() }) {
-                        DropdownMenuItem(text = { Text("Compartir letra") }, onClick = {
-                            menuOpen = false
-                            val t = smooth.displayMs
-                            val shareLines = lyrics.lines.filter { it.text.isNotBlank() }
-                            shareFrom = shareLines.indexOfLast { (it.timeMs ?: 0L) <= t }.coerceAtLeast(0)
-                        })
-                    }
-                    DropdownMenuItem(text = { Text("Compartir canción") }, onClick = { menuOpen = false; onShare() })
-                    DropdownMenuItem(text = { Text("Volver a la biblioteca") }, onClick = { menuOpen = false; onClose() })
-                }
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = "Más opciones", tint = Color.White)
             }
+        }
+
+        fun openShareLyrics() {
+            val l = lyrics ?: return
+            val t = smooth.displayMs
+            val shareLines = l.lines.filter { it.text.isNotBlank() }
+            shareFrom = shareLines.indexOfLast { (it.timeMs ?: 0L) <= t }.coerceAtLeast(0)
         }
 
         val heart: @Composable () -> Unit = {
@@ -414,6 +387,38 @@ fun NowPlayingScreen(
                     Column(Modifier.padding(top = 8.dp, bottom = 4.dp)) { controls() }
                 }
             }
+        }
+        if (menuOpen) {
+            PlayerMenuSheet(
+                cover = cover,
+                title = song?.title.orEmpty(),
+                artist = song?.artist.orEmpty(),
+                isFavorite = isFavorite,
+                hasLyrics = lyrics != null && lyrics.lines.any { it.text.isNotBlank() },
+                lyricsSynced = lyrics?.synced == true,
+                hasSavedLyrics = hasSavedLyrics,
+                animationLabel = CoverAnimation.from(coverAnimation).label,
+                actions = PlayerMenuActions(
+                    onQueue = onOpenQueue,
+                    onAddToPlaylist = onAddToPlaylist,
+                    onShareSong = onShare,
+                    onToggleFavorite = onToggleFavorite,
+                    onShowLyrics = { showLyrics = true },
+                    onEditInfo = onEditInfo,
+                    onChangeCover = onChangeCover,
+                    onChangeAnimation = { choosingAnimation = true },
+                    onSearchLyrics = { showLyrics = true; onSearchLyrics() },
+                    onGenerateLyrics = { showLyrics = true; onGenerateLyrics() },
+                    onEditLyrics = { editingLyrics = true },
+                    onShareLyrics = { openShareLyrics() },
+                    onCopyLyrics = onCopyLyricsFrom,
+                    onImportLyrics = onLoadLyricsFile,
+                    onExportLyrics = onExportLyrics,
+                    onPasteLyrics = onPasteLyrics,
+                    onRemoveLyrics = onRemoveLyrics,
+                ),
+                onDismiss = { menuOpen = false },
+            )
         }
         if (editingLyrics && lyrics != null) {
             LyricsEditor(
