@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.BlurredEdgeTreatment
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -145,7 +146,25 @@ fun LyricsView(
         when {
             lyrics == null || lyrics.lines.isEmpty() -> EmptyLyrics(status, hasAiKey, onSearchOnline, onGenerateAi, onLoadFile, onPaste)
             lyrics.synced -> SyncedLyrics(lyrics, smooth, durationMs, onSeek)
-            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 24.dp)) {
+            else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 16.dp)) {
+                // Letra sin tiempos: la IA puede sincronizarla palabra por palabra.
+                if (status == LyricsStatus.Generating) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 12.dp)) {
+                        CircularProgressIndicator(color = Accent, modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(12.dp))
+                        Text("La IA está sincronizando tu letra…", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    LyricsAction(
+                        Icons.Rounded.AutoAwesome, "Sincronizar con IA ✨",
+                        if (hasAiKey) "La IA escucha la canción y pone el tiempo de cada palabra de esta letra" else "Primero pon tu clave gratis en Ajustes",
+                        onGenerateAi,
+                    )
+                    if (status is LyricsStatus.Failed) {
+                        Text(status.message, color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 lyrics.lines.forEach { line ->
                     Text(
                         line.text,
@@ -156,12 +175,7 @@ fun LyricsView(
                         modifier = Modifier.padding(vertical = 6.dp),
                     )
                 }
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    "Letra sin tiempos. Toca ✨ para que la IA la sincronice.",
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = 13.sp,
-                )
+
             }
         }
     }
@@ -196,16 +210,19 @@ private fun SyncedLyrics(lyrics: Lyrics, smooth: SmoothPosition, durationMs: Lon
                 val distance = abs(index - current)
                 val isNow = index == current
                 // Apple: las líneas lejanas se ven más borrosas (solo cuando la letra va sola).
-                val blurDp = if (manual || isNow) 0f else min(distance, 3) * 1.3f
+                val blurTarget = if (manual || isNow) 0f else when (distance) { 1 -> 1.2f; 2 -> 2.2f; else -> 3f }
+                val blurDp by animateFloatAsState(blurTarget, tween(400), label = "desenfoque")
                 val scale by animateFloatAsState(if (isNow) 1f else 0.95f, tween(350, easing = FastOutSlowInEasing), label = "escala")
                 Box(
                     Modifier
                         .fillMaxWidth()
+                        // El desenfoque va al final (afuera), sobre el texto ya dibujado nítido,
+                        // y sin recortar las orillas: así se ve suave y en alta calidad.
+                        .then(if (blurDp > 0.05f) Modifier.blur(blurDp.dp, BlurredEdgeTreatment.Unbounded) else Modifier)
                         .graphicsLayer {
                             scaleX = scale; scaleY = scale
                             transformOrigin = TransformOrigin(0f, 0.5f)
                         }
-                        .then(if (blurDp > 0f) Modifier.blur(blurDp.dp) else Modifier)
                         .clip(RoundedCornerShape(12.dp))
                         .clickable { manual = false; onSeek(row.startMs) }
                         .padding(vertical = 10.dp, horizontal = 4.dp),
@@ -340,7 +357,7 @@ private fun EmptyLyrics(
                     onGenerateAi,
                 )
                 LyricsAction(Icons.Rounded.FileOpen, "Cargar archivo .lrc", "Si ya tienes la letra sincronizada", onLoadFile)
-                LyricsAction(Icons.Rounded.ContentPaste, "Pegar letra", "Escríbela o pégala tú", onPaste)
+                LyricsAction(Icons.Rounded.ContentPaste, "Pegar letra + sincronizar", "Lo más exacto: pega la letra real y luego la IA pone los tiempos", onPaste)
             }
         }
     }

@@ -176,7 +176,10 @@ fun NowPlayingScreen(
                     DropdownMenuItem(text = { Text("Cambiar portada") }, onClick = { menuOpen = false; onChangeCover() })
                     DropdownMenuItem(text = { Text("Editar información") }, onClick = { menuOpen = false; onEditInfo() })
                     DropdownMenuItem(text = { Text("Letra: buscar en internet") }, onClick = { menuOpen = false; showLyrics = true; onSearchLyrics() })
-                    DropdownMenuItem(text = { Text("Letra: generar con IA ✨") }, onClick = { menuOpen = false; showLyrics = true; onGenerateLyrics() })
+                    DropdownMenuItem(
+                        text = { Text(if (lyrics != null && !lyrics.synced) "Letra: sincronizar con IA ✨" else "Letra: generar con IA ✨") },
+                        onClick = { menuOpen = false; showLyrics = true; onGenerateLyrics() },
+                    )
                     DropdownMenuItem(text = { Text("Letra: cargar archivo .lrc") }, onClick = { menuOpen = false; onLoadLyricsFile() })
                     DropdownMenuItem(text = { Text("Letra: pegar texto") }, onClick = { menuOpen = false; onPasteLyrics() })
                     if (hasSavedLyrics) {

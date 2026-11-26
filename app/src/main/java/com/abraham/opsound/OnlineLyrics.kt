@@ -176,10 +176,11 @@ object OnlineLyrics {
             }
         }
 
-        // Modelo más nuevo primero; si no acepta español en tu cuenta, usamos el anterior.
-        var (code, body) = request("nova-3")
-        if (code == 400) {
-            val retry = request("nova-2")
+        // Whisper reconoce mucho mejor el canto con música; si falla, probamos con Nova.
+        var (code, body) = request("whisper-large")
+        for (fallback in listOf("nova-3", "nova-2")) {
+            if (code == 200 || code == 401 || code == 403 || code == 402) break
+            val retry = request(fallback)
             code = retry.first; body = retry.second
         }
         if (code != 200) {

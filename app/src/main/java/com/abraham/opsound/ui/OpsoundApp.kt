@@ -79,6 +79,7 @@ import com.abraham.opsound.CustomCovers
 import com.abraham.opsound.Lyrics
 import com.abraham.opsound.LyricsStore
 import com.abraham.opsound.OnlineLyrics
+import com.abraham.opsound.LyricsAligner
 import com.abraham.opsound.SongEdit
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.CompositionLocalProvider
@@ -458,22 +459,32 @@ private fun PlayerApp() {
             showSettings = true
             return
         }
+        // Si ya pegaste la letra (sin tiempos), la IA solo la sincroniza: queda exacta.
+        val reference = lyrics?.takeIf { !it.synced }?.lines?.joinToString("\n") { it.text }
         scope.launch {
             lyricsStatus = LyricsStatus.Generating
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    if (store.aiProvider == "groq") OnlineLyrics.transcribeWithAi(context, song, store.aiKey)
+                    val heard = if (store.aiProvider == "groq") OnlineLyrics.transcribeWithAi(context, song, store.aiKey)
                     else OnlineLyrics.transcribeWithDeepgram(context, song, store.deepgramKey)
+                    if (reference != null) LyricsAligner.align(reference, heard) else heard
                 }
             }
             result.onSuccess { lrc ->
                 LyricsStore.saveText(context, song.id, lrc)
                 lyricsStatus = LyricsStatus.Idle
-                Toast.makeText(context, "La IA generó la letra ✨", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    context,
+                    if (reference != null) "Tu letra quedó sincronizada ✨" else "La IA generó la letra ✨",
+                    Toast.LENGTH_SHORT,
+                ).show()
             }.onFailure { e ->
                 lyricsStatus = LyricsStatus.Failed(
-                    (e as? OnlineLyrics.AiException)?.message ?: "No se pudo conectar con la IA. Revisa tu internet."
+                    (e as? OnlineLyrics.AiException)?.message
+                        ?: (e as? LyricsAligner.AlignException)?.message
+                        ?: "No se pudo conectar con la IA. Revisa tu internet."
                 )
+                if (reference != null) Toast.makeText(context, e.message ?: "No se pudo sincronizar", Toast.LENGTH_LONG).show()
             }
         }
     }

@@ -296,7 +296,7 @@ fun PasteLyricsDialog(onSave: (String) -> Unit, onDismiss: () -> Unit) {
         text = {
             Column {
                 Text(
-                    "Pega la letra. Si trae tiempos como [01:23.45], se mostrará sincronizada.",
+                    "Pega la letra real (un renglón por línea). Después toca \"Sincronizar con IA ✨\" y la IA pondrá el tiempo de cada palabra.",
                     fontSize = 13.sp,
                     color = Color.White.copy(alpha = 0.7f),
                 )
